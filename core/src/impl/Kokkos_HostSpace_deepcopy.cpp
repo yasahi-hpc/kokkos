@@ -65,7 +65,17 @@ void hostspace_parallel_deepcopy_async(const ExecutionSpace& exec, void* dst,
       reinterpret_cast<ptrdiff_t>(dst) % 8) {
     char* dst_c       = reinterpret_cast<char*>(dst);
     const char* src_c = reinterpret_cast<const char*>(src);
-    int count         = 0;
+#if (defined(KOKKOS_ENABLE_HPX) || defined(KOKKOS_ENABLE_THREADS))
+    if constexpr (!std::is_same_v<ExecutionSpace,
+                                  Kokkos::DefaultHostExecutionSpace>) {
+      auto* internal_instance = exec.impl_instance();
+      internal_instance->m_instance_mutex.lock();
+    }
+#else
+    auto* internal_instance = exec.impl_internal_space_instance();
+    internal_instance->m_instance_mutex.lock();
+#endif
+    int count = 0;
     // get initial bytes copied
     while (reinterpret_cast<ptrdiff_t>(dst_c) % 8 != 0) {
       *dst_c = *src_c;
@@ -73,6 +83,15 @@ void hostspace_parallel_deepcopy_async(const ExecutionSpace& exec, void* dst,
       src_c++;
       count++;
     }
+#if (defined(KOKKOS_ENABLE_HPX) || defined(KOKKOS_ENABLE_THREADS))
+    if constexpr (!std::is_same_v<ExecutionSpace,
+                                  Kokkos::DefaultHostExecutionSpace>) {
+      auto* internal_instance = exec.impl_instance();
+      internal_instance->m_instance_mutex.unlock();
+    }
+#else
+    internal_instance->m_instance_mutex.unlock();
+#endif
 
     // copy the bulk of the data
     double* dst_p       = reinterpret_cast<double*>(dst_c);
@@ -82,6 +101,15 @@ void hostspace_parallel_deepcopy_async(const ExecutionSpace& exec, void* dst,
                          [=](const ptrdiff_t i) { dst_p[i] = src_p[i]; });
 
     // get final data copied
+#if (defined(KOKKOS_ENABLE_HPX) || defined(KOKKOS_ENABLE_THREADS))
+    if constexpr (!std::is_same_v<ExecutionSpace,
+                                  Kokkos::DefaultHostExecutionSpace>) {
+      auto* internal_instance = exec.impl_instance();
+      internal_instance->m_instance_mutex.lock();
+    }
+#else
+    internal_instance->m_instance_mutex.lock();
+#endif
     dst_c += ((n - count) / 8) * 8;
     src_c += ((n - count) / 8) * 8;
     char* dst_end = reinterpret_cast<char*>(dst) + n;
@@ -90,12 +118,31 @@ void hostspace_parallel_deepcopy_async(const ExecutionSpace& exec, void* dst,
       dst_c++;
       src_c++;
     }
+#if (defined(KOKKOS_ENABLE_HPX) || defined(KOKKOS_ENABLE_THREADS))
+    if constexpr (!std::is_same_v<ExecutionSpace,
+                                  Kokkos::DefaultHostExecutionSpace>) {
+      auto* internal_instance = exec.impl_instance();
+      internal_instance->m_instance_mutex.unlock();
+    }
+#else
+    internal_instance->m_instance_mutex.unlock();
+#endif
     return;
   }
 
   // Both src and dst are aligned the same way with respect to 4 byte words
   if (reinterpret_cast<ptrdiff_t>(src) % 4 ==
       reinterpret_cast<ptrdiff_t>(dst) % 4) {
+#if (defined(KOKKOS_ENABLE_HPX) || defined(KOKKOS_ENABLE_THREADS))
+    if constexpr (!std::is_same_v<ExecutionSpace,
+                                  Kokkos::DefaultHostExecutionSpace>) {
+      auto* internal_instance = exec.impl_instance();
+      internal_instance->m_instance_mutex.lock();
+    }
+#else
+    auto* internal_instance = exec.impl_internal_space_instance();
+    internal_instance->m_instance_mutex.lock();
+#endif
     char* dst_c       = reinterpret_cast<char*>(dst);
     const char* src_c = reinterpret_cast<const char*>(src);
     int count         = 0;
@@ -106,6 +153,15 @@ void hostspace_parallel_deepcopy_async(const ExecutionSpace& exec, void* dst,
       src_c++;
       count++;
     }
+#if (defined(KOKKOS_ENABLE_HPX) || defined(KOKKOS_ENABLE_THREADS))
+    if constexpr (!std::is_same_v<ExecutionSpace,
+                                  Kokkos::DefaultHostExecutionSpace>) {
+      auto* internal_instance = exec.impl_instance();
+      internal_instance->m_instance_mutex.unlock();
+    }
+#else
+    internal_instance->m_instance_mutex.unlock();
+#endif
 
     // copy the bulk of the data
     int32_t* dst_p       = reinterpret_cast<int32_t*>(dst_c);
@@ -115,6 +171,16 @@ void hostspace_parallel_deepcopy_async(const ExecutionSpace& exec, void* dst,
                          [=](const ptrdiff_t i) { dst_p[i] = src_p[i]; });
 
     // get final data copied
+#if (defined(KOKKOS_ENABLE_HPX) || defined(KOKKOS_ENABLE_THREADS))
+    if constexpr (!std::is_same_v<ExecutionSpace,
+                                  Kokkos::DefaultHostExecutionSpace>) {
+      auto* internal_instance = exec.impl_instance();
+      internal_instance->m_instance_mutex.lock();
+    }
+#else
+    internal_instance->m_instance_mutex.lock();
+#endif
+
     dst_c += ((n - count) / 4) * 4;
     src_c += ((n - count) / 4) * 4;
     char* dst_end = reinterpret_cast<char*>(dst) + n;
@@ -123,6 +189,15 @@ void hostspace_parallel_deepcopy_async(const ExecutionSpace& exec, void* dst,
       dst_c++;
       src_c++;
     }
+#if (defined(KOKKOS_ENABLE_HPX) || defined(KOKKOS_ENABLE_THREADS))
+    if constexpr (!std::is_same_v<ExecutionSpace,
+                                  Kokkos::DefaultHostExecutionSpace>) {
+      auto* internal_instance = exec.impl_instance();
+      internal_instance->m_instance_mutex.unlock();
+    }
+#else
+    internal_instance->m_instance_mutex.unlock();
+#endif
     return;
   }
 #endif
