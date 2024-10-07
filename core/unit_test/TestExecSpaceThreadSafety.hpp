@@ -59,47 +59,35 @@ void run_threaded_test(const Lambda1 l1, const Lambda2 l2) {
 // two different threads to the same execution space instance. If the kernels
 // are executed concurrently, we expect to count too many increments.
 void run_exec_space_thread_safety_deep_copy() {
-  constexpr int N = 5;
-  Kokkos::View<int *, TEST_EXECSPACE> view("view", N);
-  Kokkos::View<int *, Kokkos::DefaultHostExecutionSpace> h_view("h_view", N);
+  constexpr int N = 10;
+  constexpr int M = 1000000;
+  // Use short type in order not to be aligned
+  Kokkos::View<short *, TEST_EXECSPACE> view("view", N), view2("view2", N);
+  Kokkos::View<int, TEST_EXECSPACE> error("error");
+  Kokkos::deep_copy(view2, 1);
 
   TEST_EXECSPACE exec;
-  auto lambda1 = [=]() {
-    Kokkos::deep_copy(exec, view, 1);
+  auto lambda_copy = [=]() {
+    Kokkos::deep_copy(exec, view, view2);
     exec.fence();
   };
-  auto lambda2 = [=]() {
-    Kokkos::deep_copy(exec, view, 2);
-    exec.fence();
+  auto lambda_increment = [=]() {
+    for (int j = 0; j < M; ++j) {
+      Kokkos::parallel_for(
+          Kokkos::RangePolicy<TEST_EXECSPACE>(exec, 0, N),
+          KOKKOS_LAMBDA(int idx) {
+            Kokkos::atomic_store(&(view.data()[idx]), 0);
+            for (int i = 0; i < N; ++i) Kokkos::atomic_inc(&(view.data()[idx]));
+            if (Kokkos::atomic_load(&(view.data()[idx])) != N)
+              Kokkos::atomic_store(error.data(), 1);
+          });
+    };
   };
 
-  run_threaded_test(lambda1, lambda2);
-  int sum = 0;
-  Kokkos::parallel_reduce(
-      Kokkos::RangePolicy<TEST_EXECSPACE>(exec, 0, N),
-      KOKKOS_LAMBDA(const int i, int &lsum) { lsum += view(i); }, sum);
-
-  // We do not know the order of deep_copies,
-  // but want to guarantee that there is no race condition
-  ASSERT_TRUE(sum == N || sum == 2 * N);
-
-  auto lambda3 = [=]() {
-    Kokkos::deep_copy(exec, h_view, 1);
-    exec.fence();
-  };
-  auto lambda4 = [=]() {
-    Kokkos::deep_copy(exec, h_view, 2);
-    exec.fence();
-  };
-
-  run_threaded_test(lambda3, lambda4);
-
-  Kokkos::DefaultHostExecutionSpace h_exec;
-  int h_sum = 0;
-  Kokkos::parallel_reduce(
-      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(h_exec, 0, N),
-      KOKKOS_LAMBDA(const int i, int &lsum) { lsum += h_view(i); }, h_sum);
-  ASSERT_TRUE(h_sum == N || h_sum == 2 * N);
+  run_threaded_test(lambda_copy, lambda_increment);
+  auto host_error =
+      Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, error);
+  ASSERT_EQ(host_error(), 0);
 }
 
 TEST(TEST_CATEGORY, exec_space_thread_safety_deep_copy) {
