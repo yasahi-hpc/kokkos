@@ -68,17 +68,18 @@ void run_exec_space_thread_safety_deep_copy() {
 
   TEST_EXECSPACE exec;
   auto lambda_copy = [=]() {
-    Kokkos::deep_copy(exec, view, view2);
-    exec.fence();
+    for (int j = 0; j < M; ++j) {
+      Kokkos::deep_copy(exec, view, view2);
+    }
   };
   auto lambda_increment = [=]() {
     for (int j = 0; j < M; ++j) {
       Kokkos::parallel_for(
           Kokkos::RangePolicy<TEST_EXECSPACE>(exec, 0, N),
           KOKKOS_LAMBDA(int idx) {
-            Kokkos::atomic_store(&(view.data()[idx]), 0);
-            for (int i = 0; i < N; ++i) Kokkos::atomic_inc(&(view.data()[idx]));
-            if (Kokkos::atomic_load(&(view.data()[idx])) != N)
+            Kokkos::atomic_store(&view(idx), 0);
+            for (int i = 0; i < N; ++i) Kokkos::atomic_inc(&view(idx));
+            if (Kokkos::atomic_load(&view(idx)) != N)
               Kokkos::atomic_store(error.data(), 1);
           });
     };
@@ -92,10 +93,8 @@ void run_exec_space_thread_safety_deep_copy() {
 
 TEST(TEST_CATEGORY, exec_space_thread_safety_deep_copy) {
 #ifdef KOKKOS_ENABLE_OPENACC  // FIXME_OPENACC
-#ifdef KOKKOS_ENABLE_OPENACC_FORCE_HOST_AS_DEVICE
   if (std::is_same_v<TEST_EXECSPACE, Kokkos::Experimental::OpenACC>)
     GTEST_SKIP() << "skipping since test is known to fail with OpenACC";
-#endif
 #endif
 #ifdef KOKKOS_ENABLE_OPENMPTARGET
   if (std::is_same_v<TEST_EXECSPACE, Kokkos::Experimental::OpenMPTarget>)
