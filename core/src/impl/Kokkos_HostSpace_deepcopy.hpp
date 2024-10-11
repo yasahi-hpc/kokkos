@@ -31,6 +31,17 @@ void hostspace_parallel_deepcopy_async(void* dst, const void* src, ptrdiff_t n);
 template <typename ExecutionSpace>
 void hostspace_parallel_deepcopy_async(const ExecutionSpace& exec, void* dst,
                                        const void* src, ptrdiff_t n);
+template <typename ExecutionSpace>
+void hostspace_bytes_deepcopy_head(const ExecutionSpace& exec, char* dst_c,
+                                   const char* src_c, ptrdiff_t byte,
+                                   int& count);
+template <typename ExecutionSpace, typename DataType>
+void hostspace_deepcopy_bulk(const ExecutionSpace& exec, char* dst_c,
+                             const char* src_c, ptrdiff_t n, int count);
+template <typename ExecutionSpace>
+void hostspace_bytes_deepcopy_tail(const ExecutionSpace& exec, char* dst_c,
+                                   const char* src_c, const char* dst_end,
+                                   ptrdiff_t n, ptrdiff_t byte, int count);
 }  // namespace Impl
 
 }  // namespace Kokkos
