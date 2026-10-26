@@ -8,6 +8,7 @@
 #endif
 
 #include <Kokkos_Atomic.hpp>
+#include <Kokkos_Half.hpp>
 #include <Kokkos_MathematicalFunctions.hpp>
 #include <Kokkos_NumericTraits.hpp>
 #include <Kokkos_ReductionIdentity.hpp>
@@ -32,8 +33,14 @@ class
     alignas(2 * sizeof(RealType))
 #endif
         complex {
-  static_assert(std::is_floating_point_v<RealType> &&
-                    std::is_same_v<RealType, std::remove_cv_t<RealType>>,
+  static_assert((std::is_floating_point_v<RealType>
+#if defined KOKKOS_HAS_NATIVE_HALF_TYPE
+                 || std::is_same_v<RealType, Kokkos::Experimental::half_t>
+#endif
+#if defined KOKKOS_HAS_NATIVE_BHALF_TYPE
+                 || std::is_same_v<RealType, Kokkos::Experimental::bhalf_t>
+#endif
+                 )&&std::is_same_v<RealType, std::remove_cv_t<RealType>>,
                 "Kokkos::complex can only be instantiated for a cv-unqualified "
                 "floating point type");
 

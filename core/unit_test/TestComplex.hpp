@@ -36,14 +36,14 @@ namespace Test {
 
 // Test construction and assignment
 
-template <class ExecSpace>
+template <class ExecSpace, class RealType>
 struct TestComplexConstruction {
-  Kokkos::View<Kokkos::complex<double> *, ExecSpace> d_results;
-  typename Kokkos::View<Kokkos::complex<double> *, ExecSpace>::host_mirror_type
-      h_results;
+  Kokkos::View<Kokkos::complex<RealType> *, ExecSpace> d_results;
+  typename Kokkos::View<Kokkos::complex<RealType> *,
+                        ExecSpace>::host_mirror_type h_results;
 
   void testit() {
-    d_results = Kokkos::View<Kokkos::complex<double> *, ExecSpace>(
+    d_results = Kokkos::View<Kokkos::complex<RealType> *, ExecSpace>(
         "TestComplexConstruction", 10);
     h_results = Kokkos::create_mirror_view(d_results);
 
@@ -51,80 +51,96 @@ struct TestComplexConstruction {
     Kokkos::fence();
     Kokkos::deep_copy(h_results, d_results);
 
-    ASSERT_FLOAT_EQ(h_results(0).real(), 1.5);
-    ASSERT_FLOAT_EQ(h_results(0).imag(), 2.5);
-    ASSERT_FLOAT_EQ(h_results(1).real(), 1.5);
-    ASSERT_FLOAT_EQ(h_results(1).imag(), 2.5);
-    ASSERT_FLOAT_EQ(h_results(2).real(), 0.0);
-    ASSERT_FLOAT_EQ(h_results(2).imag(), 0.0);
-    ASSERT_FLOAT_EQ(h_results(3).real(), 3.5);
-    ASSERT_FLOAT_EQ(h_results(3).imag(), 0.0);
-    ASSERT_FLOAT_EQ(h_results(4).real(), 4.5);
-    ASSERT_FLOAT_EQ(h_results(4).imag(), 5.5);
-    ASSERT_FLOAT_EQ(h_results(5).real(), 1.5);
-    ASSERT_FLOAT_EQ(h_results(5).imag(), 2.5);
-    ASSERT_FLOAT_EQ(h_results(6).real(), 4.5);
-    ASSERT_FLOAT_EQ(h_results(6).imag(), 5.5);
-    ASSERT_FLOAT_EQ(h_results(7).real(), 7.5);
-    ASSERT_FLOAT_EQ(h_results(7).imag(), 0.0);
-    ASSERT_FLOAT_EQ(h_results(8).real(), double(8));
-    ASSERT_FLOAT_EQ(h_results(8).imag(), 0.0);
+    ASSERT_EQ(h_results(0).real(), 1.5);
+    ASSERT_EQ(h_results(0).imag(), 2.5);
+    ASSERT_EQ(h_results(1).real(), 1.5);
+    ASSERT_EQ(h_results(1).imag(), 2.5);
+    ASSERT_EQ(h_results(2).real(), 0.0);
+    ASSERT_EQ(h_results(2).imag(), 0.0);
+    ASSERT_EQ(h_results(3).real(), 3.5);
+    ASSERT_EQ(h_results(3).imag(), 0.0);
+    ASSERT_EQ(h_results(4).real(), 4.5);
+    ASSERT_EQ(h_results(4).imag(), 5.5);
+    ASSERT_EQ(h_results(5).real(), 1.5);
+    ASSERT_EQ(h_results(5).imag(), 2.5);
+    ASSERT_EQ(h_results(6).real(), 4.5);
+    ASSERT_EQ(h_results(6).imag(), 5.5);
+    ASSERT_EQ(h_results(7).real(), 7.5);
+    ASSERT_EQ(h_results(7).imag(), 0.0);
+    ASSERT_EQ(h_results(8).real(), RealType(8));
+    ASSERT_EQ(h_results(8).imag(), 0.0);
 
     // Copy construction conversion between
     // Kokkos::complex and std::complex doesn't compile
-    Kokkos::complex<double> a(1.5, 2.5), b(3.25, 5.25), r_kk;
-    std::complex<double> sa(a), sb(3.25, 5.25), r;
+    // Compare through double: ASSERT_FLOAT_EQ does not accept half_t, and all
+    // values below are exactly representable down to bhalf_t.
+    Kokkos::complex<RealType> a(1.5, 2.5), b(3.25, 5.25), r_kk;
+    std::complex<RealType> sa(a), sb(3.25, 5.25), r;
     r    = a;
     r_kk = a;
-    ASSERT_FLOAT_EQ(r.real(), r_kk.real());
-    ASSERT_FLOAT_EQ(r.imag(), r_kk.imag());
+    ASSERT_EQ(static_cast<double>(r.real()), static_cast<double>(r_kk.real()));
+    ASSERT_EQ(static_cast<double>(r.imag()), static_cast<double>(r_kk.imag()));
     r    = sb * a;
     r_kk = b * a;
-    ASSERT_FLOAT_EQ(r.real(), r_kk.real());
-    ASSERT_FLOAT_EQ(r.imag(), r_kk.imag());
+    ASSERT_EQ(static_cast<double>(r.real()), static_cast<double>(r_kk.real()));
+    ASSERT_EQ(static_cast<double>(r.imag()), static_cast<double>(r_kk.imag()));
+    ASSERT_EQ(static_cast<double>(r.real()), -8.25);
+    ASSERT_EQ(static_cast<double>(r.imag()), 16.);
     r    = sa;
     r_kk = a;
-    ASSERT_FLOAT_EQ(r.real(), r_kk.real());
-    ASSERT_FLOAT_EQ(r.imag(), r_kk.imag());
+    ASSERT_EQ(static_cast<double>(r.real()), static_cast<double>(r_kk.real()));
+    ASSERT_EQ(static_cast<double>(r.imag()), static_cast<double>(r_kk.imag()));
   }
 
   KOKKOS_INLINE_FUNCTION
   void operator()(const int & /*i*/) const {
-    Kokkos::complex<double> a(1.5, 2.5);
+    Kokkos::complex<RealType> a(1.5, 2.5);
     d_results(0) = a;
-    Kokkos::complex<double> b(a);
-    d_results(1)              = b;
-    Kokkos::complex<double> c = Kokkos::complex<double>();
-    d_results(2)              = c;
-    Kokkos::complex<double> d(3.5);
+    Kokkos::complex<RealType> b(a);
+    d_results(1)                = b;
+    Kokkos::complex<RealType> c = Kokkos::complex<RealType>();
+    d_results(2)                = c;
+    Kokkos::complex<RealType> d(3.5);
     d_results(3) = d;
-    Kokkos::complex<double> a_v(4.5, 5.5);
+    Kokkos::complex<RealType> a_v(4.5, 5.5);
     d_results(4) = a_v;
-    Kokkos::complex<double> b_v(a);
+    Kokkos::complex<RealType> b_v(a);
     d_results(5) = b_v;
-    Kokkos::complex<double> e(a_v);
+    Kokkos::complex<RealType> e(a_v);
     d_results(6) = e;
 
-    d_results(7) = double(7.5);
+    d_results(7) = RealType(7.5);
     d_results(8) = int(8);
   }
 };
 
 TEST(TEST_CATEGORY, complex_construction) {
-  TestComplexConstruction<TEST_EXECSPACE> test;
-  test.testit();
+  TestComplexConstruction<TEST_EXECSPACE, float> f;
+  f.testit();
+
+  TestComplexConstruction<TEST_EXECSPACE, double> d;
+  d.testit();
+
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  TestComplexConstruction<TEST_EXECSPACE, Kokkos::Experimental::half_t> h;
+  h.testit();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  TestComplexConstruction<TEST_EXECSPACE, Kokkos::Experimental::bhalf_t> bh;
+  bh.testit();
+#endif
 }
 
 // Test Math FUnction
 
-template <class ExecSpace>
+template <class ExecSpace, class RealType>
 struct TestComplexBasicMath {
-  Kokkos::View<Kokkos::complex<double> *, ExecSpace> d_results;
-  typename Kokkos::View<Kokkos::complex<double> *, ExecSpace>::host_mirror_type
-      h_results;
+  Kokkos::View<Kokkos::complex<RealType> *, ExecSpace> d_results;
+  typename Kokkos::View<Kokkos::complex<RealType> *,
+                        ExecSpace>::host_mirror_type h_results;
 
   void testit() {
-    d_results = Kokkos::View<Kokkos::complex<double> *, ExecSpace>(
+    d_results = Kokkos::View<Kokkos::complex<RealType> *, ExecSpace>(
         "TestComplexBasicMath", 24);
     h_results = Kokkos::create_mirror_view(d_results);
 
@@ -136,84 +152,302 @@ struct TestComplexBasicMath {
     std::complex<double> b(3.25, 5.75);
     std::complex<double> d(1.0, 2.0);
     double c = 9.3;
-    int e    = 2;
+
+    // gamma_n = (n * eps) / (1 - n * eps)
+    double eps =
+        static_cast<double>(static_cast<RealType>(Kokkos::epsilon_v<RealType>));
+    auto gamma = [&](int n) {
+      return (static_cast<RealType>(n) * eps) /
+             (RealType(1) - static_cast<RealType>(n) * eps);
+    };
+
+    auto addition = [&](double a_real, double a_imag, double b_real,
+                        double b_imag, RealType r_real, RealType r_imag,
+                        double ref_real, double ref_imag) {
+      double error_bound_real = eps * Kokkos::abs(a_real + b_real);
+      double error_bound_imag = eps * Kokkos::abs(a_imag + b_imag);
+      double error_real       = Kokkos::abs(ref_real - r_real);
+      double error_imag       = Kokkos::abs(ref_imag - r_imag);
+      return std::make_tuple(error_real, error_imag, error_bound_real,
+                             error_bound_imag);
+    };
+
+    auto subtraction = [&](double a_real, double a_imag, double b_real,
+                           double b_imag, RealType r_real, RealType r_imag,
+                           double ref_real, double ref_imag) {
+      double error_bound_real = eps * Kokkos::abs(a_real - b_real);
+      double error_bound_imag = eps * Kokkos::abs(a_imag - b_imag);
+      double error_real       = Kokkos::abs(ref_real - r_real);
+      double error_imag       = Kokkos::abs(ref_imag - r_imag);
+      return std::make_tuple(error_real, error_imag, error_bound_real,
+                             error_bound_imag);
+    };
+
+    auto multiplication = [&](double a_real, double a_imag, double b_real,
+                              double b_imag, RealType r_real, RealType r_imag,
+                              double ref_real, double ref_imag) {
+      double error_bound_real = gamma(3) * (Kokkos::abs(a_real * b_real) +
+                                            Kokkos::abs(a_imag * b_imag));
+      double error_bound_imag = gamma(3) * (Kokkos::abs(a_real * b_imag) +
+                                            Kokkos::abs(a_imag * b_real));
+      double error_real       = Kokkos::abs(ref_real - r_real);
+      double error_imag       = Kokkos::abs(ref_imag - r_imag);
+      return std::make_tuple(error_real, error_imag, error_bound_real,
+                             error_bound_imag);
+    };
+
+    auto division = [&](double a_real, double a_imag, double b_real,
+                        double b_imag, RealType r_real, RealType r_imag,
+                        double ref_real, double ref_imag) {
+      double S_r = Kokkos::abs(a_real * b_real) + Kokkos::abs(a_imag * b_imag);
+      double S_i = Kokkos::abs(a_imag * b_real) + Kokkos::abs(a_real * b_imag);
+      double S_D = Kokkos::abs(b_real) * Kokkos::abs(b_real) +
+                   Kokkos::abs(b_imag) * Kokkos::abs(b_imag);
+      double N_r              = a_real * b_real + a_imag * b_imag;
+      double N_i              = a_imag * b_real - a_real * b_imag;
+      double error_bound_real = (gamma(3) * S_r + Kokkos::abs(N_r) * gamma(2) +
+                                 eps * (Kokkos::abs(N_r) + gamma(3) * S_r)) /
+                                (S_D * (1 - gamma(2)));
+      double error_bound_imag = (gamma(3) * S_i + Kokkos::abs(N_i) * gamma(2) +
+                                 eps * (Kokkos::abs(N_i) + gamma(3) * S_i)) /
+                                (S_D * (1 - gamma(2)));
+      double error_real = Kokkos::abs(ref_real - r_real);
+      double error_imag = Kokkos::abs(ref_imag - r_imag);
+
+      return std::make_tuple(error_real, error_imag, error_bound_real,
+                             error_bound_imag);
+    };
 
     std::complex<double> r;
-    r = a + b;
-    ASSERT_FLOAT_EQ(h_results(0).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(0).imag(), r.imag());
-    r = a - b;
-    ASSERT_FLOAT_EQ(h_results(1).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(1).imag(), r.imag());
-    r = a * b;
-    ASSERT_FLOAT_EQ(h_results(2).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(2).imag(), r.imag());
-    r = a / b;
-    ASSERT_FLOAT_EQ(h_results(3).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(3).imag(), r.imag());
-    r = d + a;
-    ASSERT_FLOAT_EQ(h_results(4).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(4).imag(), r.imag());
-    r = d - a;
-    ASSERT_FLOAT_EQ(h_results(5).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(5).imag(), r.imag());
-    r = d * a;
-    ASSERT_FLOAT_EQ(h_results(6).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(6).imag(), r.imag());
-    r = d / a;
-    ASSERT_FLOAT_EQ(h_results(7).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(7).imag(), r.imag());
-    r = a + c;
-    ASSERT_FLOAT_EQ(h_results(8).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(8).imag(), r.imag());
-    r = a - c;
-    ASSERT_FLOAT_EQ(h_results(9).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(9).imag(), r.imag());
-    r = a * c;
-    ASSERT_FLOAT_EQ(h_results(10).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(10).imag(), r.imag());
-    r = a / c;
-    ASSERT_FLOAT_EQ(h_results(11).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(11).imag(), r.imag());
-    r = d + c;
-    ASSERT_FLOAT_EQ(h_results(12).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(12).imag(), r.imag());
-    r = d - c;
-    ASSERT_FLOAT_EQ(h_results(13).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(13).imag(), r.imag());
-    r = d * c;
-    ASSERT_FLOAT_EQ(h_results(14).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(14).imag(), r.imag());
-    r = d / c;
-    ASSERT_FLOAT_EQ(h_results(15).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(15).imag(), r.imag());
-    r = c + a;
-    ASSERT_FLOAT_EQ(h_results(16).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(16).imag(), r.imag());
-    r = c - a;
-    ASSERT_FLOAT_EQ(h_results(17).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(17).imag(), r.imag());
-    r = c * a;
-    ASSERT_FLOAT_EQ(h_results(18).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(18).imag(), r.imag());
-    r = c / a;
-    ASSERT_FLOAT_EQ(h_results(19).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(19).imag(), r.imag());
-    r = a;
-    /* r = a+e; */ ASSERT_FLOAT_EQ(h_results(20).real(), r.real() + e);
-    ASSERT_FLOAT_EQ(h_results(20).imag(), r.imag());
-    /* r = a-e; */ ASSERT_FLOAT_EQ(h_results(21).real(), r.real() - e);
-    ASSERT_FLOAT_EQ(h_results(21).imag(), r.imag());
-    /* r = a*e; */ ASSERT_FLOAT_EQ(h_results(22).real(), r.real() * e);
-    ASSERT_FLOAT_EQ(h_results(22).imag(), r.imag() * e);
-    /* r = a/e; */ ASSERT_FLOAT_EQ(h_results(23).real(), r.real() / 2);
-    ASSERT_FLOAT_EQ(h_results(23).imag(), r.imag() / e);
+    // Testing z1 op z2 (op: +, -, *, /)
+    {
+      r = a + b;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          addition(a.real(), a.imag(), b.real(), b.imag(), h_results(0).real(),
+                   h_results(0).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = a - b;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          subtraction(a.real(), a.imag(), b.real(), b.imag(),
+                      h_results(1).real(), h_results(1).imag(), r.real(),
+                      r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = a * b;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          multiplication(a.real(), a.imag(), b.real(), b.imag(),
+                         h_results(2).real(), h_results(2).imag(), r.real(),
+                         r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = a / b;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          division(a.real(), a.imag(), b.real(), b.imag(), h_results(3).real(),
+                   h_results(3).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    // Testing z1 op z2 (op: +=, -=, *=, /=)
+    {
+      r = d + a;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          addition(d.real(), d.imag(), a.real(), a.imag(), h_results(4).real(),
+                   h_results(4).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = d - a;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          subtraction(d.real(), d.imag(), a.real(), a.imag(),
+                      h_results(5).real(), h_results(5).imag(), r.real(),
+                      r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = d * a;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          multiplication(d.real(), d.imag(), a.real(), a.imag(),
+                         h_results(6).real(), h_results(6).imag(), r.real(),
+                         r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = d / a;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          division(d.real(), d.imag(), a.real(), a.imag(), h_results(7).real(),
+                   h_results(7).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    // Testing z1 op r1 (op: +, -, *, /)
+    {
+      r = a + c;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          addition(a.real(), a.imag(), c, 0.0, h_results(8).real(),
+                   h_results(8).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = a - c;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          subtraction(a.real(), a.imag(), c, 0.0, h_results(9).real(),
+                      h_results(9).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = a * c;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          multiplication(a.real(), a.imag(), c, 0.0, h_results(10).real(),
+                         h_results(10).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = a / c;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          division(a.real(), a.imag(), c, 0.0, h_results(11).real(),
+                   h_results(11).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    // Testing z1 op r1 (op: +=, -=, *=, /=)
+    {
+      r = d + c;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          addition(d.real(), d.imag(), c, 0.0, h_results(12).real(),
+                   h_results(12).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = d - c;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          subtraction(d.real(), d.imag(), c, 0.0, h_results(13).real(),
+                      h_results(13).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = d * c;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          multiplication(d.real(), d.imag(), c, 0.0, h_results(14).real(),
+                         h_results(14).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = d / c;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          division(d.real(), d.imag(), c, 0.0, h_results(15).real(),
+                   h_results(15).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    // Testing r1 op z1 (op: +, -, *, /)
+    {
+      r = c + a;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          addition(c, 0.0, a.real(), a.imag(), h_results(16).real(),
+                   h_results(16).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = c - a;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          subtraction(c, 0.0, a.real(), a.imag(), h_results(17).real(),
+                      h_results(17).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = c * a;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          multiplication(c, 0.0, a.real(), a.imag(), h_results(18).real(),
+                         h_results(18).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      r = c / a;
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          division(c, 0.0, a.real(), a.imag(), h_results(19).real(),
+                   h_results(19).imag(), r.real(), r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    // Testing z1 op i1 (op: +, -, *, /)
+    int e = 2;
+    r     = a;
+    {
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          addition(a.real(), a.imag(), e, 0.0, h_results(20).real(),
+                   h_results(20).imag(), r.real() + e, r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          subtraction(a.real(), a.imag(), e, 0.0, h_results(21).real(),
+                      h_results(21).imag(), r.real() - e, r.imag());
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          multiplication(a.real(), a.imag(), e, 0.0, h_results(22).real(),
+                         h_results(22).imag(), r.real() * e, r.imag() * e);
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
+
+    {
+      auto [error_real, error_imag, error_bound_real, error_bound_imag] =
+          division(a.real(), a.imag(), e, 0.0, h_results(23).real(),
+                   h_results(23).imag(), r.real() / e, r.imag() / e);
+      ASSERT_LE(error_real, error_bound_real);
+      ASSERT_LE(error_imag, error_bound_imag);
+    }
   }
 
   KOKKOS_INLINE_FUNCTION
   void operator()(const int & /*i*/) const {
-    Kokkos::complex<double> a(1.5, 2.5);
-    Kokkos::complex<double> b(3.25, 5.75);
+    Kokkos::complex<RealType> a(1.5, 2.5);
+    Kokkos::complex<RealType> b(3.25, 5.75);
     // Basic math complex / complex
     d_results(0) = a + b;
     d_results(1) = a - b;
@@ -222,15 +456,15 @@ struct TestComplexBasicMath {
     d_results(4).real(1.0);
     d_results(4).imag(2.0);
     d_results(4) += a;
-    d_results(5) = Kokkos::complex<double>(1.0, 2.0);
+    d_results(5) = Kokkos::complex<RealType>(1.0, 2.0);
     d_results(5) -= a;
-    d_results(6) = Kokkos::complex<double>(1.0, 2.0);
+    d_results(6) = Kokkos::complex<RealType>(1.0, 2.0);
     d_results(6) *= a;
-    d_results(7) = Kokkos::complex<double>(1.0, 2.0);
+    d_results(7) = Kokkos::complex<RealType>(1.0, 2.0);
     d_results(7) /= a;
 
     // Basic math complex / scalar
-    double c      = 9.3;
+    RealType c    = 9.3;
     d_results(8)  = a + c;
     d_results(9)  = a - c;
     d_results(10) = a * c;
@@ -238,11 +472,11 @@ struct TestComplexBasicMath {
     d_results(12).real(1.0);
     d_results(12).imag(2.0);
     d_results(12) += c;
-    d_results(13) = Kokkos::complex<double>(1.0, 2.0);
+    d_results(13) = Kokkos::complex<RealType>(1.0, 2.0);
     d_results(13) -= c;
-    d_results(14) = Kokkos::complex<double>(1.0, 2.0);
+    d_results(14) = Kokkos::complex<RealType>(1.0, 2.0);
     d_results(14) *= c;
-    d_results(15) = Kokkos::complex<double>(1.0, 2.0);
+    d_results(15) = Kokkos::complex<RealType>(1.0, 2.0);
     d_results(15) /= c;
 
     // Basic math scalar / complex
@@ -260,18 +494,44 @@ struct TestComplexBasicMath {
 };
 
 TEST(TEST_CATEGORY, complex_basic_math) {
-  TestComplexBasicMath<TEST_EXECSPACE> test;
-  test.testit();
+  TestComplexBasicMath<TEST_EXECSPACE, float> f;
+  f.testit();
+  TestComplexBasicMath<TEST_EXECSPACE, double> d;
+  d.testit();
+
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  TestComplexBasicMath<TEST_EXECSPACE, Kokkos::Experimental::half_t> h;
+  h.testit();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  TestComplexBasicMath<TEST_EXECSPACE, Kokkos::Experimental::bhalf_t> bh;
+  bh.testit();
+#endif
 }
 
-template <class ExecSpace>
+// Compares a Kokkos::complex result with a std::complex<double> reference,
+// using a relative tolerance scaled by the modulus of the reference.
+// A macro rather than a function, so that gtest reports the line of each check.
+#define CHECK_COMPLEX_NEAR(value, ref, eps)                              \
+  do {                                                                   \
+    const std::complex<double> ref_ = (ref);                             \
+    const double tol_ = 10 * (eps) * std::max(1.0, std::abs(ref_));      \
+    EXPECT_NEAR(static_cast<double>((value).real()), ref_.real(), tol_); \
+    EXPECT_NEAR(static_cast<double>((value).imag()), ref_.imag(), tol_); \
+  } while (false)
+
+template <class ExecSpace, class RealType>
 struct TestComplexSpecialFunctions {
-  Kokkos::View<Kokkos::complex<double> *, ExecSpace> d_results;
-  typename Kokkos::View<Kokkos::complex<double> *, ExecSpace>::host_mirror_type
-      h_results;
+  // |a|^9.3 ~ 2e4 with a phase of ~9.6 rad: too inaccurate in half precision.
+  static constexpr double pow_exponent =
+      std::is_floating_point_v<RealType> ? 9.3 : 1.2;
+
+  Kokkos::View<Kokkos::complex<RealType> *, ExecSpace> d_results;
+  typename Kokkos::View<Kokkos::complex<RealType> *,
+                        ExecSpace>::host_mirror_type h_results;
 
   void testit() {
-    d_results = Kokkos::View<Kokkos::complex<double> *, ExecSpace>(
+    d_results = Kokkos::View<Kokkos::complex<RealType> *, ExecSpace>(
         "TestComplexSpecialFunctions", 20);
     h_results = Kokkos::create_mirror_view(d_results);
 
@@ -279,85 +539,46 @@ struct TestComplexSpecialFunctions {
     Kokkos::fence();
     Kokkos::deep_copy(h_results, d_results);
 
-    std::complex<double> a(1.5, 2.5);
-    double c = 9.3;
+    // epsilon_v<half_t> is a bit pattern wrapper: convert through RealType.
+    const double eps =
+        static_cast<double>(static_cast<RealType>(Kokkos::epsilon_v<RealType>));
 
-    std::complex<double> r;
-    r = a;
-    ASSERT_FLOAT_EQ(h_results(0).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(0).imag(), r.imag());
-    r = std::sqrt(a);
-    ASSERT_FLOAT_EQ(h_results(1).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(1).imag(), r.imag());
-    r = std::pow(a, c);
-    ASSERT_FLOAT_EQ(h_results(2).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(2).imag(), r.imag());
-    r = std::abs(a);
-    ASSERT_FLOAT_EQ(h_results(3).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(3).imag(), r.imag());
-    r = std::exp(a);
-    ASSERT_FLOAT_EQ(h_results(4).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(4).imag(), r.imag());
-    r = Kokkos::exp(a);
-    ASSERT_FLOAT_EQ(h_results(4).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(4).imag(), r.imag());
-    r = std::log(a);
-    ASSERT_FLOAT_EQ(h_results(5).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(5).imag(), r.imag());
-    r = std::sin(a);
-    ASSERT_FLOAT_EQ(h_results(6).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(6).imag(), r.imag());
-    r = std::cos(a);
-    ASSERT_FLOAT_EQ(h_results(7).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(7).imag(), r.imag());
-    r = std::tan(a);
-    ASSERT_FLOAT_EQ(h_results(8).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(8).imag(), r.imag());
-    r = std::sinh(a);
-    ASSERT_FLOAT_EQ(h_results(9).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(9).imag(), r.imag());
-    r = std::cosh(a);
-    ASSERT_FLOAT_EQ(h_results(10).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(10).imag(), r.imag());
-    r = std::tanh(a);
-    ASSERT_FLOAT_EQ(h_results(11).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(11).imag(), r.imag());
-    r = std::asinh(a);
-    ASSERT_FLOAT_EQ(h_results(12).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(12).imag(), r.imag());
-    r = std::acosh(a);
-    ASSERT_FLOAT_EQ(h_results(13).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(13).imag(), r.imag());
+    std::complex<double> a(1.5, 2.5);
+    double c = pow_exponent;
+
+    CHECK_COMPLEX_NEAR(h_results(0), a, eps);
+    CHECK_COMPLEX_NEAR(h_results(1), std::sqrt(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(2), std::pow(a, c), eps);
+    CHECK_COMPLEX_NEAR(h_results(3), std::abs(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(4), std::exp(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(4), Kokkos::exp(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(5), std::log(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(6), std::sin(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(7), std::cos(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(8), std::tan(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(9), std::sinh(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(10), std::cosh(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(11), std::tanh(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(12), std::asinh(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(13), std::acosh(a), eps);
     // atanh
-    r = std::atanh(a);
-    ASSERT_FLOAT_EQ(h_results(14).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(14).imag(), r.imag());
-    r = std::asin(a);
-    ASSERT_FLOAT_EQ(h_results(15).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(15).imag(), r.imag());
-    r = std::acos(a);
-    ASSERT_FLOAT_EQ(h_results(16).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(16).imag(), r.imag());
+    CHECK_COMPLEX_NEAR(h_results(14), std::atanh(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(15), std::asin(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(16), std::acos(a), eps);
     // atan
-    r = std::atan(a);
-    ASSERT_FLOAT_EQ(h_results(17).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(17).imag(), r.imag());
+    CHECK_COMPLEX_NEAR(h_results(17), std::atan(a), eps);
     // log10
-    r = std::log10(a);
-    ASSERT_FLOAT_EQ(h_results(18).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(18).imag(), r.imag());
+    CHECK_COMPLEX_NEAR(h_results(18), std::log10(a), eps);
     // norm
-    r = std::norm(a);
-    ASSERT_FLOAT_EQ(h_results(19).real(), r.real());
-    ASSERT_FLOAT_EQ(h_results(19).imag(), r.imag());
+    CHECK_COMPLEX_NEAR(h_results(19), std::norm(a), eps);
   }
 
   KOKKOS_INLINE_FUNCTION
   void operator()(const int & /*i*/) const {
-    Kokkos::complex<double> a(1.5, 2.5);
-    double c = 9.3;
+    Kokkos::complex<RealType> a(1.5, 2.5);
+    RealType c = pow_exponent;
 
-    d_results(0)  = Kokkos::complex<double>(Kokkos::real(a), Kokkos::imag(a));
+    d_results(0)  = Kokkos::complex<RealType>(Kokkos::real(a), Kokkos::imag(a));
     d_results(1)  = Kokkos::sqrt(a);
     d_results(2)  = Kokkos::pow(a, c);
     d_results(3)  = Kokkos::abs(a);
@@ -380,40 +601,73 @@ struct TestComplexSpecialFunctions {
   }
 };
 
+#undef CHECK_COMPLEX_NEAR
+
+TEST(TEST_CATEGORY, complex_special_funtions) {
+  TestComplexSpecialFunctions<TEST_EXECSPACE, float> f;
+  f.testit();
+  TestComplexSpecialFunctions<TEST_EXECSPACE, double> d;
+  d.testit();
+
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  TestComplexSpecialFunctions<TEST_EXECSPACE, Kokkos::Experimental::half_t> h;
+  h.testit();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  TestComplexSpecialFunctions<TEST_EXECSPACE, Kokkos::Experimental::bhalf_t> bh;
+  bh.testit();
+#endif
+}
+
+template <typename RealType>
 void testComplexIO() {
-  Kokkos::complex<double> z = {3.14, 1.41};
+  // 9/64 and 25/64 are exact down to bhalf_t and print the same with the
+  // default stream format (float/double) and with half_t's fixed 6 decimals.
+  Kokkos::complex<RealType> z = {0.140625, 0.390625};
   std::stringstream ss;
   ss << z;
-  ASSERT_EQ(ss.str(), "(3.14,1.41)");
+  ASSERT_EQ(ss.str(), "(0.140625,0.390625)");
 
   ss.str("1 (2) (3,4)");
   ss.clear();
   ss >> z;
-  ASSERT_EQ(z, (Kokkos::complex<double>{1, 0}));
+  ASSERT_EQ(z, (Kokkos::complex<RealType>{1, 0}));
   ss >> z;
-  ASSERT_EQ(z, (Kokkos::complex<double>{2, 0}));
+  ASSERT_EQ(z, (Kokkos::complex<RealType>{2, 0}));
   ss >> z;
-  ASSERT_EQ(z, (Kokkos::complex<double>{3, 4}));
+  ASSERT_EQ(z, (Kokkos::complex<RealType>{3, 4}));
 }
 
-TEST(TEST_CATEGORY, complex_special_funtions) {
-  TestComplexSpecialFunctions<TEST_EXECSPACE> test;
-  test.testit();
+TEST(TEST_CATEGORY, complex_io) {
+  testComplexIO<float>();
+  testComplexIO<double>();
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  testComplexIO<Kokkos::Experimental::half_t>();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  testComplexIO<Kokkos::Experimental::bhalf_t>();
+#endif
 }
-
-TEST(TEST_CATEGORY, complex_io) { testComplexIO(); }
 
 static_assert(std::is_trivially_copyable_v<Kokkos::complex<float>>);
 static_assert(std::is_trivially_copyable_v<Kokkos::complex<double>>);
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+static_assert(std::is_trivially_copyable_v<
+              Kokkos::complex<Kokkos::Experimental::half_t>>);
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+static_assert(std::is_trivially_copyable_v<
+              Kokkos::complex<Kokkos::Experimental::bhalf_t>>);
+#endif
 #ifndef KOKKOS_IMPL_32BIT  // FIXME_32BIT
 // error: requested alignment '24' is not a positive power of 2
 static_assert(std::is_trivially_copyable_v<Kokkos::complex<long double>>);
 #endif
 
-template <class ExecSpace>
+template <class ExecSpace, class RealType>
 struct TestBugPowAndLogComplex {
-  Kokkos::View<Kokkos::complex<double> *, ExecSpace> d_pow;
-  Kokkos::View<Kokkos::complex<double> *, ExecSpace> d_log;
+  Kokkos::View<Kokkos::complex<RealType> *, ExecSpace> d_pow;
+  Kokkos::View<Kokkos::complex<RealType> *, ExecSpace> d_log;
   TestBugPowAndLogComplex() : d_pow("pow", 2), d_log("log", 2) { test(); }
   void test() {
     Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, 1), *this);
@@ -431,15 +685,15 @@ struct TestBugPowAndLogComplex {
     ASSERT_FLOAT_EQ(h_log(1).imag(), 2.819842099193151);
   }
   KOKKOS_FUNCTION void operator()(int) const {
-    d_pow(0) = Kokkos::pow(Kokkos::complex<double>(+3., 1.), 3.);
-    d_pow(1) = Kokkos::pow(Kokkos::complex<double>(-3., 1.), 3.);
-    d_log(0) = Kokkos::log(Kokkos::complex<double>(+3., 1.));
-    d_log(1) = Kokkos::log(Kokkos::complex<double>(-3., 1.));
+    d_pow(0) = Kokkos::pow(Kokkos::complex<RealType>(+3., 1.), 3.);
+    d_pow(1) = Kokkos::pow(Kokkos::complex<RealType>(-3., 1.), 3.);
+    d_log(0) = Kokkos::log(Kokkos::complex<RealType>(+3., 1.));
+    d_log(1) = Kokkos::log(Kokkos::complex<RealType>(-3., 1.));
   }
 };
 
 TEST(TEST_CATEGORY, complex_issue_3865) {
-  TestBugPowAndLogComplex<TEST_EXECSPACE>();
+  TestBugPowAndLogComplex<TEST_EXECSPACE, double>();
 }
 
 TEST(TEST_CATEGORY, complex_operations_arithmetic_types_overloads) {
@@ -479,11 +733,11 @@ TEST(TEST_CATEGORY, complex_operations_arithmetic_types_overloads) {
                                 Kokkos::complex<long double>>));
 }
 
-template <class ExecSpace>
+template <class ExecSpace, class RealType>
 struct TestComplexStructuredBindings {
   using exec_space       = ExecSpace;
-  using value_type       = double;
-  using complex_type     = Kokkos::complex<double>;
+  using value_type       = RealType;
+  using complex_type     = Kokkos::complex<RealType>;
   using device_view_type = Kokkos::View<complex_type *, exec_space>;
   using host_view_type   = typename device_view_type::host_mirror_type;
 
@@ -491,7 +745,7 @@ struct TestComplexStructuredBindings {
   host_view_type h_results;
 
   // tuple_size
-  static_assert(std::is_same_v<std::tuple_size<complex_type>::type,
+  static_assert(std::is_same_v<typename std::tuple_size<complex_type>::type,
                                std::integral_constant<size_t, 2>>);
 
   // tuple_element
@@ -544,26 +798,26 @@ struct TestComplexStructuredBindings {
     Kokkos::deep_copy(h_results, d_results);
 
     // get lvalue
-    ASSERT_FLOAT_EQ(h_results[0].real(), 2.);
-    ASSERT_FLOAT_EQ(h_results[0].imag(), 3.);
+    ASSERT_EQ(h_results[0].real(), 2.);
+    ASSERT_EQ(h_results[0].imag(), 3.);
 
     // get rvalue
-    ASSERT_FLOAT_EQ(h_results[1].real(), 2.);
-    ASSERT_FLOAT_EQ(h_results[1].imag(), 3.);
+    ASSERT_EQ(h_results[1].real(), 2.);
+    ASSERT_EQ(h_results[1].imag(), 3.);
 
     // get const lvalue
-    ASSERT_FLOAT_EQ(h_results[2].real(), 5.);
-    ASSERT_FLOAT_EQ(h_results[2].imag(), 7.);
+    ASSERT_EQ(h_results[2].real(), 5.);
+    ASSERT_EQ(h_results[2].imag(), 7.);
 
     // get const rvalue
-    ASSERT_FLOAT_EQ(h_results[3].real(), 5.);
-    ASSERT_FLOAT_EQ(h_results[3].imag(), 7.);
+    ASSERT_EQ(h_results[3].real(), 5.);
+    ASSERT_EQ(h_results[3].imag(), 7.);
 
     // swap real and imaginary
-    ASSERT_FLOAT_EQ(h_results[4].real(), 11.);
-    ASSERT_FLOAT_EQ(h_results[4].imag(), 13.);
-    ASSERT_FLOAT_EQ(h_results[5].real(), 13.);
-    ASSERT_FLOAT_EQ(h_results[5].imag(), 11.);
+    ASSERT_EQ(h_results[4].real(), 11.);
+    ASSERT_EQ(h_results[4].imag(), 13.);
+    ASSERT_EQ(h_results[5].real(), 13.);
+    ASSERT_EQ(h_results[5].imag(), 11.);
   }
 
   KOKKOS_FUNCTION
@@ -612,8 +866,21 @@ struct TestComplexStructuredBindings {
 };
 
 TEST(TEST_CATEGORY, complex_structured_bindings) {
-  TestComplexStructuredBindings<TEST_EXECSPACE> test;
-  test.testit();
+  TestComplexStructuredBindings<TEST_EXECSPACE, float> f;
+  f.testit();
+
+  TestComplexStructuredBindings<TEST_EXECSPACE, double> d;
+  d.testit();
+
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  TestComplexStructuredBindings<TEST_EXECSPACE, Kokkos::Experimental::half_t> h;
+  h.testit();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  TestComplexStructuredBindings<TEST_EXECSPACE, Kokkos::Experimental::bhalf_t>
+      bh;
+  bh.testit();
+#endif
 }
 
 #define CHECK_COMPLEX(_value_, _real_, _imag_) \
@@ -621,62 +888,68 @@ TEST(TEST_CATEGORY, complex_structured_bindings) {
   if (_value_.real() != _real_) return false;  \
   if (_value_.imag() != _imag_) return false;
 
+template <class RealType>
 constexpr bool can_appear_in_constant_expressions() {
-  const Kokkos::complex<double> from_single{1.2};
-  const Kokkos::complex<double> from_both{1.2, 3.4};
-  const Kokkos::complex<double> from_none{};
+  const Kokkos::complex<RealType> from_single{1.2};
+  const Kokkos::complex<RealType> from_both{1.2, 3.4};
+  const Kokkos::complex<RealType> from_none{};
 
-  CHECK_COMPLEX(from_single, 1.2, 0.);
-  CHECK_COMPLEX(from_both, 1.2, 3.4);
-  CHECK_COMPLEX(from_none, 0., 0.);
+  CHECK_COMPLEX(from_single, RealType(1.2), RealType(0.));
+  CHECK_COMPLEX(from_both, RealType(1.2), RealType(3.4));
+  CHECK_COMPLEX(from_none, RealType(0.), RealType(0.));
 
-  Kokkos::complex<double> from_copy_assign;
+  Kokkos::complex<RealType> from_copy_assign;
   from_copy_assign = from_both;
   const auto from_copy_constr(from_both);
 
-  CHECK_COMPLEX(from_copy_assign, 1.2, 3.4);
-  CHECK_COMPLEX(from_copy_constr, 1.2, 3.4);
+  CHECK_COMPLEX(from_copy_assign, RealType(1.2), RealType(3.4));
+  CHECK_COMPLEX(from_copy_constr, RealType(1.2), RealType(3.4));
 
-  Kokkos::complex<double> from_move_assign;
+  Kokkos::complex<RealType> from_move_assign;
   from_move_assign = std::move(from_both);
   const auto from_move_constr(std::move(from_copy_assign));
 
-  CHECK_COMPLEX(from_move_assign, 1.2, 3.4);
-  CHECK_COMPLEX(from_move_constr, 1.2, 3.4);
+  CHECK_COMPLEX(from_move_assign, RealType(1.2), RealType(3.4));
+  CHECK_COMPLEX(from_move_constr, RealType(1.2), RealType(3.4));
 
-  Kokkos::complex<double> from_real;
+  Kokkos::complex<RealType> from_real;
   from_real = 4.;
 
-  CHECK_COMPLEX(from_real, 4., 0.);
+  CHECK_COMPLEX(from_real, RealType(4.), RealType(0.));
 
   return true;
 }
 
 #undef CHECK_COMPLEX
 
-static_assert(can_appear_in_constant_expressions());
+static_assert(can_appear_in_constant_expressions<float>());
+static_assert(can_appear_in_constant_expressions<double>());
 
+template <class RealType>
 constexpr bool comparison_in_constant_expression() {
-  static_assert(Kokkos::complex<double>{42., 43.} ==
-                Kokkos::complex<double>{42., 43.});
-  static_assert(Kokkos::complex<double>{42., 43.} !=
-                Kokkos::complex<double>{42., 42.});
+  static_assert(Kokkos::complex<RealType>{42., 43.} ==
+                Kokkos::complex<RealType>{42., 43.});
+  static_assert(Kokkos::complex<RealType>{42., 43.} !=
+                Kokkos::complex<RealType>{42., 42.});
 
-  static_assert(Kokkos::complex<double>{42., 0.} == double{42.});
-  static_assert(Kokkos::complex<double>{42., 43.} != double{42.});
+  static_assert(Kokkos::complex<RealType>{42., 0.} == RealType{42.});
+  static_assert(Kokkos::complex<RealType>{42., 43.} != RealType{42.});
 
-  static_assert(double{42.} == Kokkos::complex<double>{42., 0.});
-  static_assert(double{43.} != Kokkos::complex<double>{42., 0.});
+  static_assert(RealType{42.} == Kokkos::complex<RealType>{42., 0.});
+  static_assert(RealType{43.} != Kokkos::complex<RealType>{42., 0.});
 
   return true;
 }
 
-static_assert(comparison_in_constant_expression());
+static_assert(comparison_in_constant_expression<float>());
+static_assert(comparison_in_constant_expression<double>());
 
+template <class RealType>
 constexpr bool test_complex_norm() {
-  return Kokkos::norm(Kokkos::complex<double>{4., 2.}) == 20.;
+  return Kokkos::norm(Kokkos::complex<RealType>{4., 2.}) == RealType(20.);
 }
-static_assert(test_complex_norm());
+static_assert(test_complex_norm<float>());
+static_assert(test_complex_norm<double>());
 
 constexpr bool test_overload_norm() {
   constexpr auto res_int = Kokkos::norm(int(100000));
@@ -691,18 +964,66 @@ constexpr bool test_overload_norm() {
 }
 static_assert(test_overload_norm());
 
+template <class RealType>
 constexpr bool test_complex_conj() {
-  static_assert(Kokkos::conj(Kokkos::complex<double>{1., 1.}) ==
-                Kokkos::complex<double>{1., -1.});
-  static_assert(Kokkos::conj(Kokkos::complex<double>{1., -1.}) ==
-                Kokkos::complex<double>{1., 1.});
-  static_assert(Kokkos::conj(Kokkos::complex<double>{-1., 1.}) ==
-                Kokkos::complex<double>{-1., -1.});
-  static_assert(Kokkos::conj(Kokkos::complex<double>{-1., -1.}) ==
-                Kokkos::complex<double>{-1., 1.});
+  static_assert(Kokkos::conj(Kokkos::complex<RealType>{1., 1.}) ==
+                Kokkos::complex<RealType>{1., -1.});
+  static_assert(Kokkos::conj(Kokkos::complex<RealType>{1., -1.}) ==
+                Kokkos::complex<RealType>{1., 1.});
+  static_assert(Kokkos::conj(Kokkos::complex<RealType>{-1., 1.}) ==
+                Kokkos::complex<RealType>{-1., -1.});
+  static_assert(Kokkos::conj(Kokkos::complex<RealType>{-1., -1.}) ==
+                Kokkos::complex<RealType>{-1., 1.});
   return true;
 }
-static_assert(test_complex_conj());
+static_assert(test_complex_conj<float>());
+static_assert(test_complex_conj<double>());
+
+// half_t and bhalf_t cannot be used in constant expressions: their conversions,
+// comparisons and arithmetic are not constexpr (e.g. CUDA __half intrinsics).
+// Run the checks above at runtime instead.
+template <class RealType>
+bool comparison_at_runtime() {
+  return Kokkos::complex<RealType>{42., 43.} ==
+             Kokkos::complex<RealType>{42., 43.} &&
+         Kokkos::complex<RealType>{42., 43.} !=
+             Kokkos::complex<RealType>{42., 42.} &&
+         Kokkos::complex<RealType>{42., 0.} == RealType{42.} &&
+         Kokkos::complex<RealType>{42., 43.} != RealType{42.} &&
+         RealType{42.} == Kokkos::complex<RealType>{42., 0.} &&
+         RealType{43.} != Kokkos::complex<RealType>{42., 0.};
+}
+
+template <class RealType>
+bool complex_conj_at_runtime() {
+  return Kokkos::conj(Kokkos::complex<RealType>{1., 1.}) ==
+             Kokkos::complex<RealType>{1., -1.} &&
+         Kokkos::conj(Kokkos::complex<RealType>{1., -1.}) ==
+             Kokkos::complex<RealType>{1., 1.} &&
+         Kokkos::conj(Kokkos::complex<RealType>{-1., 1.}) ==
+             Kokkos::complex<RealType>{-1., -1.} &&
+         Kokkos::conj(Kokkos::complex<RealType>{-1., -1.}) ==
+             Kokkos::complex<RealType>{-1., 1.};
+}
+
+template <class RealType>
+void test_constexpr_checks_at_runtime() {
+  ASSERT_TRUE(can_appear_in_constant_expressions<RealType>());
+  ASSERT_TRUE(comparison_at_runtime<RealType>());
+  ASSERT_TRUE(test_complex_norm<RealType>());
+  ASSERT_TRUE(complex_conj_at_runtime<RealType>());
+}
+
+TEST(TEST_CATEGORY, complex_constexpr_checks_at_runtime) {
+  test_constexpr_checks_at_runtime<float>();
+  test_constexpr_checks_at_runtime<double>();
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  test_constexpr_checks_at_runtime<Kokkos::Experimental::half_t>();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  test_constexpr_checks_at_runtime<Kokkos::Experimental::bhalf_t>();
+#endif
+}
 
 }  // namespace Test
 
