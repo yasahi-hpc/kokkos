@@ -924,8 +924,8 @@ constexpr bool test_complex_conj() {
 static_assert(test_complex_conj());
 
 // The non-member arithmetic operators can appear in constant expressions.
-// Division by a complex number is not covered: Impl::complex_divide is not
-// constexpr yet.  All results are exact in float and double.
+// Division by a complex number is tested below.  All results are exact in
+// float and double.
 template <class T>
 constexpr bool test_arithmetic_in_constant_expression() {
   using C = Kokkos::complex<T>;
@@ -968,6 +968,48 @@ static_assert(Kokkos::complex<float>(1, 2) - 1.0 ==
 // std::complex times Kokkos::complex (host only).
 static_assert(std::complex<double>(1, 2) * Kokkos::complex<double>(3, 4) ==
               Kokkos::complex<double>(-5, 10));
+
+// Division by a complex number in constant expressions.  Only finite operands
+// and a nonzero divisor are constant expressions (see Impl::complex_divide).
+template <class T>
+constexpr bool test_division_in_constant_expression() {
+  using C = Kokkos::complex<T>;
+  // Both branches of Smith's algorithm; exact results.
+  static_assert(C(T(-5), T(10)) / C(T(3), T(4)) == C(T(1), T(2)));  // |c|<|d|
+  static_assert(C(T(-2), T(11)) / C(T(4), T(3)) == C(T(1), T(2)));  // |c|>=|d|
+  static_assert(T(25) / C(T(3), T(4)) == C(T(3), T(-4)));
+
+  C z(T(-2), T(11));
+  z /= C(T(4), T(3));
+  if (z != C(T(1), T(2))) return false;
+
+  // Range guards: halving near the largest value, scaling a divisor at the
+  // smallest normal value: (1 + i) / (m (4 + 2i)) = (0.3 + 0.1i) / m.
+  constexpr T big = Kokkos::Experimental::finite_max_v<T> / 2;
+  static_assert(C(big, big) / C(big, big) == C(T(1), T(0)));
+  constexpr T m = Kokkos::Experimental::norm_min_v<T>;
+  constexpr C r = C(T(1), T(1)) / C(4 * m, 2 * m);
+  static_assert(r.real() * m > T(0.2999) && r.real() * m < T(0.3001));
+  static_assert(r.imag() * m > T(0.0999) && r.imag() * m < T(0.1001));
+  return true;
+}
+static_assert(test_division_in_constant_expression<float>());
+static_assert(test_division_in_constant_expression<double>());
+static_assert(Kokkos::complex<float>(-5, 10) / Kokkos::complex<double>(3, 4) ==
+              Kokkos::complex<double>(1, 2));
+
+// Compile-time and run-time division agree (up to contraction at run time).
+TEST(TEST_CATEGORY, complex_division_constexpr_matches_runtime) {
+  using C           = Kokkos::complex<double>;
+  constexpr C q     = C(1.5, 2.5) / C(3.25, 5.75);
+  volatile double a = 1.5, b = 2.5, c = 3.25, d = 5.75;
+  // Read through volatile so that the division is computed at run time.
+  const C r = C(double(a), double(b)) / C(double(c), double(d));
+  const double tol =
+      2 * Kokkos::Experimental::epsilon_v<double> * Kokkos::abs(q);
+  EXPECT_NEAR(q.real(), r.real(), tol);
+  EXPECT_NEAR(q.imag(), r.imag(), tol);
+}
 
 }  // namespace Test
 

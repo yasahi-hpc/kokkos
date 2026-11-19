@@ -21,6 +21,97 @@ namespace Kokkos {
 
 namespace Impl {
 
+// |x| for the comparisons in complex_divide_smith: Kokkos::fabs at run time,
+// and a comparison during constant evaluation (Kokkos::fabs is not constexpr).
+// The sign of a zero result does not matter for the comparisons.
+struct ComplexRuntimeFabs {
+  template <class T>
+  KOKKOS_INLINE_FUNCTION static T apply(T x) {
+    return Kokkos::fabs(x);
+  }
+};
+struct ComplexConstexprFabs {
+  template <class T>
+  KOKKOS_INLINE_FUNCTION static constexpr T apply(T x) {
+    return x < T(0) ? -x : x;
+  }
+};
+
+/// \brief Smith's algorithm for (a + ib) / (c + id) = x + iy, with the range
+///   guards of libgcc's __divdc3 (GCC >= 12), without any NaN recovery.
+template <class Fabs, class T>
+KOKKOS_INLINE_FUNCTION constexpr void complex_divide_smith(
+    T a, T b, T c, T d, T& x, T& y) noexcept(noexcept(T{} / T{})) {
+  // Thresholds of libgcc's RBIG, RMIN, RMIN2, RMINSCAL and RMAX2.
+  constexpr T rbig     = Kokkos::finite_max_v<T> / 2;
+  constexpr T rmin     = Kokkos::norm_min_v<T>;
+  constexpr T rmin2    = Kokkos::epsilon_v<T>;
+  constexpr T rminscal = T(1) / Kokkos::epsilon_v<T>;
+  constexpr T rmax2    = rbig * rmin2;
+
+  if (Fabs::apply(c) < Fabs::apply(d)) {
+    // Prevent underflow when the denominator is near the largest value.
+    if (Fabs::apply(d) >= rbig) {
+      a /= 2;
+      b /= 2;
+      c /= 2;
+      d /= 2;
+    }
+    // Scale up small operands to avoid underflow; no new overflow is possible.
+    if (Fabs::apply(d) < rmin2 ||
+        (Fabs::apply(a) < rmin && Fabs::apply(b) < rmax2 &&
+         Fabs::apply(d) < rmax2) ||
+        (Fabs::apply(b) < rmin && Fabs::apply(a) < rmax2 &&
+         Fabs::apply(d) < rmax2)) {
+      a *= rminscal;
+      b *= rminscal;
+      c *= rminscal;
+      d *= rminscal;
+    }
+    const T ratio = c / d;
+    const T denom = c * ratio + d;
+    // Choose another order of computation if ratio is subnormal.
+    if (Fabs::apply(ratio) > rmin) {
+      x = (a * ratio + b) / denom;
+      y = (b * ratio - a) / denom;
+    } else {
+      x = (c * (a / d) + b) / denom;
+      y = (c * (b / d) - a) / denom;
+    }
+  } else {
+    if (Fabs::apply(c) >= rbig) {
+      a /= 2;
+      b /= 2;
+      c /= 2;
+      d /= 2;
+    }
+    if (Fabs::apply(c) < rmin2 ||
+        (Fabs::apply(a) < rmin && Fabs::apply(b) < rmax2 &&
+         Fabs::apply(c) < rmax2) ||
+        (Fabs::apply(b) < rmin && Fabs::apply(a) < rmax2 &&
+         Fabs::apply(c) < rmax2)) {
+      a *= rminscal;
+      b *= rminscal;
+      c *= rminscal;
+      d *= rminscal;
+    }
+    const T ratio = d / c;
+    const T denom = d * ratio + c;
+    if (Fabs::apply(ratio) > rmin) {
+      x = (b * ratio + a) / denom;
+      y = (b - a * ratio) / denom;
+    } else {
+      x = (a + d * (b / c)) / denom;
+      y = (b - d * (a / c)) / denom;
+    }
+  }
+}
+
+// Not constexpr: calling it during constant evaluation makes the expression
+// not constant, and the name says why.
+KOKKOS_INLINE_FUNCTION void
+complex_division_by_zero_or_of_inf_or_nan_is_not_a_constant_expression() {}
+
 /// \brief Complex division (a + ib) / (c + id) = re + i im.
 ///
 /// Smith's algorithm, with the range guards of libgcc's __divdc3 (GCC >= 12),
@@ -28,16 +119,29 @@ namespace Impl {
 /// that the formula computes as NaN + iNaN: nonzero / zero, infinite / finite
 /// and finite / infinite.  No test is made up front, so finite operands only
 /// pay for the comparisons of the range guards.
+///
+/// During constant evaluation, the operands must be finite and the divisor
+/// nonzero: compilers reject floating-point operations that produce a NaN or
+/// divide by zero there.  For such operands Smith's algorithm never produces a
+/// NaN, so the recovery is not needed, and the result is the same as at run
+/// time (up to floating-point contraction at run time).
 template <class T>
-KOKKOS_INLINE_FUNCTION void complex_divide(T a, T b, T c, T d, T& re,
-                                           T& im) noexcept(noexcept(T{} /
-                                                                    T{})) {
-  // Thresholds of libgcc's RBIG, RMIN, RMIN2, RMINSCAL and RMAX2.
-  constexpr T rbig     = Kokkos::finite_max_v<T> / 2;
-  constexpr T rmin     = Kokkos::norm_min_v<T>;
-  constexpr T rmin2    = Kokkos::epsilon_v<T>;
-  constexpr T rminscal = T(1) / Kokkos::epsilon_v<T>;
-  constexpr T rmax2    = rbig * rmin2;
+KOKKOS_INLINE_FUNCTION constexpr void complex_divide(
+    T a, T b, T c, T d, T& re, T& im) noexcept(noexcept(T{} / T{})) {
+#if defined(__cpp_if_consteval)  // since C++23
+  if consteval {
+#else
+  if (__builtin_is_constant_evaluated()) {
+#endif
+    constexpr T inf = Kokkos::infinity_v<T>;
+    auto finite     = [](T v) { return v == v && v != inf && v != -inf; };
+    if (!(finite(a) && finite(b) && finite(c) && finite(d)) ||
+        (c == T(0) && d == T(0))) {
+      complex_division_by_zero_or_of_inf_or_nan_is_not_a_constant_expression();
+    }
+    complex_divide_smith<ComplexConstexprFabs>(a, b, c, d, re, im);
+    return;
+  }
 
   // The operands as given, for the NaN recovery below.
   const T a0 = a;
@@ -47,62 +151,7 @@ KOKKOS_INLINE_FUNCTION void complex_divide(T a, T b, T c, T d, T& re,
 
   T x;
   T y;
-  if (Kokkos::fabs(c) < Kokkos::fabs(d)) {
-    // Prevent underflow when the denominator is near the largest value.
-    if (Kokkos::fabs(d) >= rbig) {
-      a /= 2;
-      b /= 2;
-      c /= 2;
-      d /= 2;
-    }
-    // Scale up small operands to avoid underflow; no new overflow is possible.
-    if (Kokkos::fabs(d) < rmin2 ||
-        (Kokkos::fabs(a) < rmin && Kokkos::fabs(b) < rmax2 &&
-         Kokkos::fabs(d) < rmax2) ||
-        (Kokkos::fabs(b) < rmin && Kokkos::fabs(a) < rmax2 &&
-         Kokkos::fabs(d) < rmax2)) {
-      a *= rminscal;
-      b *= rminscal;
-      c *= rminscal;
-      d *= rminscal;
-    }
-    const T ratio = c / d;
-    const T denom = c * ratio + d;
-    // Choose another order of computation if ratio is subnormal.
-    if (Kokkos::fabs(ratio) > rmin) {
-      x = (a * ratio + b) / denom;
-      y = (b * ratio - a) / denom;
-    } else {
-      x = (c * (a / d) + b) / denom;
-      y = (c * (b / d) - a) / denom;
-    }
-  } else {
-    if (Kokkos::fabs(c) >= rbig) {
-      a /= 2;
-      b /= 2;
-      c /= 2;
-      d /= 2;
-    }
-    if (Kokkos::fabs(c) < rmin2 ||
-        (Kokkos::fabs(a) < rmin && Kokkos::fabs(b) < rmax2 &&
-         Kokkos::fabs(c) < rmax2) ||
-        (Kokkos::fabs(b) < rmin && Kokkos::fabs(a) < rmax2 &&
-         Kokkos::fabs(c) < rmax2)) {
-      a *= rminscal;
-      b *= rminscal;
-      c *= rminscal;
-      d *= rminscal;
-    }
-    const T ratio = d / c;
-    const T denom = d * ratio + c;
-    if (Kokkos::fabs(ratio) > rmin) {
-      x = (b * ratio + a) / denom;
-      y = (b - a * ratio) / denom;
-    } else {
-      x = (a + d * (b / c)) / denom;
-      y = (b - d * (a / c)) / denom;
-    }
-  }
+  complex_divide_smith<ComplexRuntimeFabs>(a, b, c, d, x, y);
 
   // Recover infinities and zeros that computed as NaN + iNaN.
   if (Kokkos::isnan(x) && Kokkos::isnan(y)) {
@@ -894,7 +943,8 @@ operator/(const complex<RealType1>& x,
 
 //! Binary operator / for complex.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator/(const complex<RealType1>& x,
           const complex<RealType2>& y) noexcept(noexcept(RealType1{} /
                                                          RealType2{})) {
@@ -909,7 +959,8 @@ operator/(const complex<RealType1>& x,
 
 //! Binary operator / for complex and real numbers
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator/(const RealType1& x,
           const complex<RealType2>& y) noexcept(noexcept(RealType1{} /
                                                          RealType2{})) {
