@@ -19,6 +19,118 @@
 
 namespace Kokkos {
 
+namespace Impl {
+
+/// \brief Complex division (a + ib) / (c + id) = re + i im.
+///
+/// Smith's algorithm, with the range guards of libgcc's __divdc3 (GCC >= 12),
+/// followed by the C99 Annex G (G.5.2) recovery of the infinities and zeros
+/// that the formula computes as NaN + iNaN: nonzero / zero, infinite / finite
+/// and finite / infinite.  No test is made up front, so finite operands only
+/// pay for the comparisons of the range guards.
+template <class T>
+KOKKOS_INLINE_FUNCTION void complex_divide(T a, T b, T c, T d, T& re,
+                                           T& im) noexcept(noexcept(T{} /
+                                                                    T{})) {
+  // Thresholds of libgcc's RBIG, RMIN, RMIN2, RMINSCAL and RMAX2.
+  constexpr T rbig     = Kokkos::finite_max_v<T> / 2;
+  constexpr T rmin     = Kokkos::norm_min_v<T>;
+  constexpr T rmin2    = Kokkos::epsilon_v<T>;
+  constexpr T rminscal = T(1) / Kokkos::epsilon_v<T>;
+  constexpr T rmax2    = rbig * rmin2;
+
+  // The operands as given, for the NaN recovery below.
+  const T a0 = a;
+  const T b0 = b;
+  const T c0 = c;
+  const T d0 = d;
+
+  T x;
+  T y;
+  if (Kokkos::fabs(c) < Kokkos::fabs(d)) {
+    // Prevent underflow when the denominator is near the largest value.
+    if (Kokkos::fabs(d) >= rbig) {
+      a /= 2;
+      b /= 2;
+      c /= 2;
+      d /= 2;
+    }
+    // Scale up small operands to avoid underflow; no new overflow is possible.
+    if (Kokkos::fabs(d) < rmin2 ||
+        (Kokkos::fabs(a) < rmin && Kokkos::fabs(b) < rmax2 &&
+         Kokkos::fabs(d) < rmax2) ||
+        (Kokkos::fabs(b) < rmin && Kokkos::fabs(a) < rmax2 &&
+         Kokkos::fabs(d) < rmax2)) {
+      a *= rminscal;
+      b *= rminscal;
+      c *= rminscal;
+      d *= rminscal;
+    }
+    const T ratio = c / d;
+    const T denom = c * ratio + d;
+    // Choose another order of computation if ratio is subnormal.
+    if (Kokkos::fabs(ratio) > rmin) {
+      x = (a * ratio + b) / denom;
+      y = (b * ratio - a) / denom;
+    } else {
+      x = (c * (a / d) + b) / denom;
+      y = (c * (b / d) - a) / denom;
+    }
+  } else {
+    if (Kokkos::fabs(c) >= rbig) {
+      a /= 2;
+      b /= 2;
+      c /= 2;
+      d /= 2;
+    }
+    if (Kokkos::fabs(c) < rmin2 ||
+        (Kokkos::fabs(a) < rmin && Kokkos::fabs(b) < rmax2 &&
+         Kokkos::fabs(c) < rmax2) ||
+        (Kokkos::fabs(b) < rmin && Kokkos::fabs(a) < rmax2 &&
+         Kokkos::fabs(c) < rmax2)) {
+      a *= rminscal;
+      b *= rminscal;
+      c *= rminscal;
+      d *= rminscal;
+    }
+    const T ratio = d / c;
+    const T denom = d * ratio + c;
+    if (Kokkos::fabs(ratio) > rmin) {
+      x = (b * ratio + a) / denom;
+      y = (b - a * ratio) / denom;
+    } else {
+      x = (a + d * (b / c)) / denom;
+      y = (b - d * (a / c)) / denom;
+    }
+  }
+
+  // Recover infinities and zeros that computed as NaN + iNaN.
+  if (Kokkos::isnan(x) && Kokkos::isnan(y)) {
+    constexpr T inf = Kokkos::infinity_v<T>;
+    if (c0 == T(0) && d0 == T(0) &&
+        (!Kokkos::isnan(a0) || !Kokkos::isnan(b0))) {
+      x = Kokkos::copysign(inf, c0) * a0;
+      y = Kokkos::copysign(inf, c0) * b0;
+    } else if ((Kokkos::isinf(a0) || Kokkos::isinf(b0)) &&
+               Kokkos::isfinite(c0) && Kokkos::isfinite(d0)) {
+      const T ai = Kokkos::copysign(Kokkos::isinf(a0) ? T(1) : T(0), a0);
+      const T bi = Kokkos::copysign(Kokkos::isinf(b0) ? T(1) : T(0), b0);
+      x          = inf * (ai * c0 + bi * d0);
+      y          = inf * (bi * c0 - ai * d0);
+    } else if ((Kokkos::isinf(c0) || Kokkos::isinf(d0)) &&
+               Kokkos::isfinite(a0) && Kokkos::isfinite(b0)) {
+      const T ci = Kokkos::copysign(Kokkos::isinf(c0) ? T(1) : T(0), c0);
+      const T di = Kokkos::copysign(Kokkos::isinf(d0) ? T(1) : T(0), d0);
+      x          = T(0) * (a0 * ci + b0 * di);
+      y          = T(0) * (b0 * ci - a0 * di);
+    }
+  }
+  re = x;
+  im = y;
+}
+
+}  // namespace Impl
+
 /// \class complex
 /// \brief Partial reimplementation of std::complex that works as the
 ///   result of a Kokkos::parallel_reduce.
@@ -181,54 +293,18 @@ class
   // Conditional noexcept, just in case RType throws on divide-by-zero
   constexpr KOKKOS_INLINE_FUNCTION complex& operator/=(
       const complex<RealType>& y) noexcept(noexcept(RealType{} / RealType{})) {
-    // Scale (by the "1-norm" of y) to avoid unwarranted overflow.
-    // If the real part is +/-Inf and the imaginary part is -/+Inf,
-    // this won't change the result.
-    const RealType s = fabs(y.real()) + fabs(y.imag());
-
-    // If s is 0, then y is zero, so x/y == real(x)/0 + i*imag(x)/0.
-    // In that case, the relation x/y == (x/s) / (y/s) doesn't hold,
-    // because y/s is NaN.
-    // TODO mark this branch unlikely
-    if (s == RealType(0)) {
-      this->re_ /= s;
-      this->im_ /= s;
-    } else {
-      const complex x_scaled(this->re_ / s, this->im_ / s);
-      const complex y_conj_scaled(y.re_ / s, -(y.im_) / s);
-      const RealType y_scaled_abs =
-          y_conj_scaled.re_ * y_conj_scaled.re_ +
-          y_conj_scaled.im_ * y_conj_scaled.im_;  // abs(y) == abs(conj(y))
-      *this = x_scaled * y_conj_scaled;
-      *this /= y_scaled_abs;
-    }
+    Impl::complex_divide(re_, im_, y.re_, y.im_, re_, im_);
     return *this;
   }
 
-  constexpr KOKKOS_INLINE_FUNCTION complex& operator/=(
-      const std::complex<RealType>& y) noexcept(noexcept(RealType{} /
-                                                         RealType{})) {
-    // Scale (by the "1-norm" of y) to avoid unwarranted overflow.
-    // If the real part is +/-Inf and the imaginary part is -/+Inf,
-    // this won't change the result.
-    const RealType s = fabs(y.real()) + fabs(y.imag());
-
-    // If s is 0, then y is zero, so x/y == real(x)/0 + i*imag(x)/0.
-    // In that case, the relation x/y == (x/s) / (y/s) doesn't hold,
-    // because y/s is NaN.
-    if (s == RealType(0)) {
-      this->re_ /= s;
-      this->im_ /= s;
-    } else {
-      const complex x_scaled(this->re_ / s, this->im_ / s);
-      const complex y_conj_scaled(y.re_ / s, -(y.im_) / s);
-      const RealType y_scaled_abs =
-          y_conj_scaled.re_ * y_conj_scaled.re_ +
-          y_conj_scaled.im_ * y_conj_scaled.im_;  // abs(y) == abs(conj(y))
-      *this = x_scaled * y_conj_scaled;
-      *this /= y_scaled_abs;
-    }
-    return *this;
+  /// \brief Division assignment from std::complex.
+  ///
+  /// This operator cannot be called in a CUDA device function,
+  /// because std::complex's methods and nonmember functions are not
+  /// marked as CUDA device functions.
+  constexpr complex& operator/=(const std::complex<RealType>& y) noexcept(
+      noexcept(RealType{} / RealType{})) {
+    return *this /= complex(y.real(), y.imag());
   }
 
   constexpr KOKKOS_INLINE_FUNCTION complex& operator/=(
@@ -812,27 +888,13 @@ KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
 operator/(const complex<RealType1>& x,
           const complex<RealType2>& y) noexcept(noexcept(RealType1{} /
                                                          RealType2{})) {
-  // Scale (by the "1-norm" of y) to avoid unwarranted overflow.
-  // If the real part is +/-Inf and the imaginary part is -/+Inf,
-  // this won't change the result.
-  using common_real_type   = std::common_type_t<RealType1, RealType2>;
-  const common_real_type s = fabs(real(y)) + fabs(imag(y));
-
-  // If s is 0, then y is zero, so x/y == real(x)/0 + i*imag(x)/0.
-  // In that case, the relation x/y == (x/s) / (y/s) doesn't hold,
-  // because y/s is NaN.
-  if (s == 0.0) {
-    return complex<common_real_type>(real(x) / s, imag(x) / s);
-  } else {
-    const complex<common_real_type> x_scaled(real(x) / s, imag(x) / s);
-    const complex<common_real_type> y_conj_scaled(real(y) / s, -imag(y) / s);
-    const RealType1 y_scaled_abs =
-        real(y_conj_scaled) * real(y_conj_scaled) +
-        imag(y_conj_scaled) * imag(y_conj_scaled);  // abs(y) == abs(conj(y))
-    complex<common_real_type> result = x_scaled * y_conj_scaled;
-    result /= y_scaled_abs;
-    return result;
-  }
+  // All of the computation is done in the common type.
+  using common_real_type = std::common_type_t<RealType1, RealType2>;
+  common_real_type re{};
+  common_real_type im{};
+  Impl::complex_divide<common_real_type>(x.real(), x.imag(), y.real(), y.imag(),
+                                         re, im);
+  return complex<common_real_type>(re, im);
 }
 
 //! Binary operator / for complex and real numbers
@@ -854,8 +916,7 @@ std::ostream& operator<<(std::ostream& os, const complex<RealType>& x) {
 template <class RealType>
 std::istream& operator>>(std::istream& is, complex<RealType>& x) {
   std::complex<RealType> x_std;
-  is >> x_std;
-  x = x_std;  // only assigns on success of above
+  if (is >> x_std) x = x_std;  // leave x unchanged on failure
   return is;
 }
 

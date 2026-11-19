@@ -403,6 +403,152 @@ TEST(TEST_CATEGORY, complex_special_funtions) {
 
 TEST(TEST_CATEGORY, complex_io) { testComplexIO(); }
 
+// A failed extraction sets failbit and leaves the complex number unchanged.
+TEST(TEST_CATEGORY, complex_io_failure) {
+  const Kokkos::complex<double> orig{5., 6.};
+  for (const char *input : {"x", "(x)", "(1,x)", "(1;2)", "(1,2"}) {
+    std::stringstream ss(input);
+    Kokkos::complex<double> z = orig;
+    ss >> z;
+    EXPECT_TRUE(ss.fail()) << input;
+    EXPECT_EQ(z, orig) << input;
+  }
+}
+
+// operator/=(std::complex<RealType>) is host-only, and divides like
+// operator/(complex, complex).
+template <class RealType>
+void testComplexDivideAssignStdComplex() {
+  using C = Kokkos::complex<RealType>;
+  C z(RealType(1.5), RealType(2.5));
+  z /= std::complex<RealType>(RealType(3.25), RealType(5.75));
+  EXPECT_EQ(
+      z, C(RealType(1.5), RealType(2.5)) / C(RealType(3.25), RealType(5.75)));
+}
+
+TEST(TEST_CATEGORY, complex_divide_assign_std_complex) {
+  testComplexDivideAssignStdComplex<float>();
+  testComplexDivideAssignStdComplex<double>();
+}
+
+// Complex division: special values required by C99 Annex G (G.5.2), operands
+// near the ends of the range, and mixed precision.  Each case is computed with
+// both operator/ and operator/=.
+template <class RealType, class ExecSpace>
+struct TestComplexDivision {
+  using C                       = Kokkos::complex<RealType>;
+  static constexpr int N        = 7;
+  static constexpr RealType inf = Kokkos::Experimental::infinity_v<RealType>;
+  static constexpr RealType big =
+      Kokkos::Experimental::finite_max_v<RealType> / 2;
+  static constexpr RealType tiny = Kokkos::Experimental::norm_min_v<RealType>;
+
+  Kokkos::View<C *[2], ExecSpace> d_in;   // numerator, denominator
+  Kokkos::View<C *[2], ExecSpace> d_out;  // x / y, x /= y
+  Kokkos::View<Kokkos::complex<float>[1], ExecSpace> d_xf;
+  Kokkos::View<Kokkos::complex<double>[1], ExecSpace> d_yd;
+  Kokkos::View<Kokkos::complex<double>[2], ExecSpace> d_mixed;
+
+  TestComplexDivision()
+      : d_in("in", N),
+        d_out("out", N),
+        d_xf("xf"),
+        d_yd("yd"),
+        d_mixed("mixed") {}
+
+  KOKKOS_FUNCTION void operator()(int i) const {
+    d_out(i, 0) = d_in(i, 0) / d_in(i, 1);
+    C z         = d_in(i, 0);
+    z /= d_in(i, 1);
+    d_out(i, 1) = z;
+    if (i == 0) {
+      d_mixed(0) = d_xf(0) / d_yd(0);  // complex<float> / complex<double>
+      d_mixed(1) = Kokkos::complex<double>(d_xf(0)) / d_yd(0);
+    }
+  }
+
+  void testit() {
+    const C num[N] = {C(1, 1), C(1, 1),     C(inf, 0),
+                      C(1, 1), C(big, big), C(RealType(1.5), RealType(2.5)),
+                      C(1, 1)};
+    const C den[N] = {C(0, 0),
+                      C(-RealType(0), 0),
+                      C(1, 1),
+                      C(inf, 0),
+                      C(big, big),
+                      C(RealType(3.25), RealType(5.75)),
+                      C(4 * tiny, 2 * tiny)};
+    auto h_in      = Kokkos::create_mirror_view(d_in);
+    for (int i = 0; i < N; ++i) {
+      h_in(i, 0) = num[i];
+      h_in(i, 1) = den[i];
+    }
+    Kokkos::deep_copy(d_in, h_in);
+    Kokkos::deep_copy(d_xf, Kokkos::complex<float>(1.f / 3.f, 2.f / 7.f));
+    Kokkos::deep_copy(d_yd, Kokkos::complex<double>(1.1, 2.3));
+
+    Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, N), *this);
+    auto h_out =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
+    auto h_mixed =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_mixed);
+
+    // Reference for ordinary values: textbook formula in long double.
+    auto ref = [](C x, C y) {
+      using L       = long double;
+      const L a     = x.real();
+      const L b     = x.imag();
+      const L c     = y.real();
+      const L d     = y.imag();
+      const L denom = c * c + d * d;
+      return std::complex<L>((a * c + b * d) / denom, (b * c - a * d) / denom);
+    };
+    auto near = [](C r, std::complex<long double> e) {
+      const long double err =
+          std::abs(std::complex<long double>(r.real(), r.imag()) - e);
+      return err <= 4 * Kokkos::Experimental::epsilon_v<RealType> * std::abs(e);
+    };
+
+    for (int j = 0; j < 2; ++j) {
+      SCOPED_TRACE(j == 0 ? "operator/" : "operator/=");
+      // nonzero / zero
+      EXPECT_EQ(h_out(0, j).real(), inf);
+      EXPECT_EQ(h_out(0, j).imag(), inf);
+      // nonzero / zero, the sign of infinity is the sign of real(y)
+      EXPECT_EQ(h_out(1, j).real(), -inf);
+      EXPECT_EQ(h_out(1, j).imag(), -inf);
+      // infinite / finite
+      EXPECT_EQ(h_out(2, j).real(), inf);
+      EXPECT_EQ(h_out(2, j).imag(), -inf);
+      // finite / infinite
+      EXPECT_EQ(h_out(3, j), C(0, 0));
+      // |real(y)| + |imag(y)| overflows
+      EXPECT_EQ(h_out(4, j), C(1, 0));
+      // ordinary values
+      EXPECT_TRUE(near(h_out(5, j), ref(num[5], den[5]))) << h_out(5, j);
+      // smallest normal denominator: (1 + i) / (m (4 + 2i)) = (6 + 2i) / (20 m)
+      EXPECT_TRUE(near(
+          h_out(6, j),
+          std::complex<long double>(6.L / (20.L * tiny), 2.L / (20.L * tiny))))
+          << h_out(6, j);
+    }
+
+    // complex<float> / complex<double> is computed in double
+    EXPECT_EQ(h_mixed(0), h_mixed(1));
+    const auto e = std::complex<long double>(1.f / 3.f, 2.f / 7.f) /
+                   std::complex<long double>(1.1, 2.3);
+    const double tol = 4 * Kokkos::Experimental::epsilon_v<double> *
+                       static_cast<double>(std::abs(e));
+    EXPECT_NEAR(h_mixed(0).real(), static_cast<double>(e.real()), tol);
+    EXPECT_NEAR(h_mixed(0).imag(), static_cast<double>(e.imag()), tol);
+  }
+};
+
+TEST(TEST_CATEGORY, complex_division) {
+  TestComplexDivision<float, TEST_EXECSPACE>().testit();
+  TestComplexDivision<double, TEST_EXECSPACE>().testit();
+}
+
 static_assert(std::is_trivially_copyable_v<Kokkos::complex<float>>);
 static_assert(std::is_trivially_copyable_v<Kokkos::complex<double>>);
 #ifndef KOKKOS_IMPL_32BIT  // FIXME_32BIT
