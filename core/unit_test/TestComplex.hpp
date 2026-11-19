@@ -25,7 +25,11 @@ import kokkos.core;
 #include <Kokkos_Core.hpp>
 #endif
 #include <complex>
+#include <functional>
+#include <iomanip>
+#include <iterator>
 #include <sstream>
+#include <string>
 
 namespace {
 template <typename... Ts>
@@ -413,6 +417,75 @@ TEST(TEST_CATEGORY, complex_io_failure) {
     EXPECT_TRUE(ss.fail()) << input;
     EXPECT_EQ(z, orig) << input;
   }
+}
+
+// Insertion and extraction behave like those of std::complex<RealType>.
+template <class RealType, class CharT>
+void testComplexIOLikeStd() {
+  using Stream = std::basic_stringstream<CharT>;
+  using String = std::basic_string<CharT>;
+  auto widen   = [](const char *s) {
+    std::string n(s);
+    return String(n.begin(), n.end());
+  };
+
+  // Output: identical characters for every formatting state.
+  const RealType values[][2] = {{RealType(3.14), RealType(1.41)},
+                                {RealType(-0.5), RealType(1e-7)},
+                                {RealType(12345.678), RealType(-0.)}};
+  const std::function<void(Stream &)> formats[] = {
+      [](Stream &) {},
+      [](Stream &s) { s.precision(3); },
+      [](Stream &s) { s << std::scientific << std::uppercase; },
+      [](Stream &s) { s << std::fixed << std::setprecision(2); },
+      [](Stream &s) { s << std::showpos << std::showpoint; },
+      [](Stream &s) { s << std::hexfloat; },
+      // The width applies to the whole "(re,im)"
+      [](Stream &s) {
+        s << std::left << std::setfill(CharT('*')) << std::setw(30);
+      },
+      [](Stream &s) { s << std::setw(30); },
+  };
+  for (const auto &v : values) {
+    for (const auto &format : formats) {
+      Stream sk;
+      Stream ss;
+      format(sk);
+      format(ss);
+      sk << Kokkos::complex<RealType>(v[0], v[1]) << CharT('|');
+      ss << std::complex<RealType>(v[0], v[1]) << CharT('|');
+      EXPECT_TRUE(sk.str() == ss.str());
+    }
+  }
+
+  // Input: same value, same stream state and same unread characters.
+  const char *inputs[] = {"1",      "(2)",          "(3,4)", " ( 5 , 6 ) z",
+                          "7 8",    "(1e-2,-3.5)z", "",      "x",
+                          "(x)",    "(1,x)",        "(1;2)", "(1,2",
+                          "(1,2]z", "(1",           "("};
+  for (const char *input : inputs) {
+    SCOPED_TRACE(input);
+    Stream sk(widen(input));
+    Stream ss(widen(input));
+    Kokkos::complex<RealType> zk(RealType(5), RealType(6));
+    std::complex<RealType> zs(RealType(5), RealType(6));
+    sk >> zk;
+    ss >> zs;
+    EXPECT_EQ(sk.fail(), ss.fail());
+    EXPECT_EQ(zk.real(), zs.real());
+    EXPECT_EQ(zk.imag(), zs.imag());
+    EXPECT_EQ(sk.eof(), ss.eof());
+    sk.clear();
+    ss.clear();
+    EXPECT_TRUE(String(std::istreambuf_iterator<CharT>(sk), {}) ==
+                String(std::istreambuf_iterator<CharT>(ss), {}));
+  }
+}
+
+TEST(TEST_CATEGORY, complex_io_like_std) {
+  testComplexIOLikeStd<float, char>();
+  testComplexIOLikeStd<double, char>();
+  testComplexIOLikeStd<double, wchar_t>();
 }
 
 // operator/=(std::complex<RealType>) is host-only, and divides like

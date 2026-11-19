@@ -906,17 +906,26 @@ operator/(const RealType1& x,
   return complex<std::common_type_t<RealType1, RealType2>>(x) / y;
 }
 
-template <class RealType>
-std::ostream& operator<<(std::ostream& os, const complex<RealType>& x) {
-  const std::complex<RealType> x_std(Kokkos::real(x), Kokkos::imag(x));
-  os << x_std;
-  return os;
+// Stream I/O delegates to std::complex, so Kokkos::complex is written and read
+// exactly as the standard library does for std::complex.  These overloads are
+// still needed: std::complex's operators are templates on complex<T>, and T
+// cannot be deduced from Kokkos::complex (implicit conversions are not
+// considered during deduction), and operator>> needs an lvalue std::complex.
+
+/// \brief Insertion operator: writes "(real,imag)" as std::complex does.
+template <class RealType, class CharT, class Traits>
+std::basic_ostream<CharT, Traits>& operator<<(
+    std::basic_ostream<CharT, Traits>& os, const complex<RealType>& x) {
+  return os << std::complex<RealType>(x.real(), x.imag());
 }
 
-template <class RealType>
-std::istream& operator>>(std::istream& is, complex<RealType>& x) {
+/// \brief Extraction operator: reads "r", "(r)" or "(r,i)" as std::complex
+///   does.  On failure, failbit is set and \c x is left unchanged.
+template <class RealType, class CharT, class Traits>
+std::basic_istream<CharT, Traits>& operator>>(
+    std::basic_istream<CharT, Traits>& is, complex<RealType>& x) {
   std::complex<RealType> x_std;
-  if (is >> x_std) x = x_std;  // leave x unchanged on failure
+  if (is >> x_std) x = complex<RealType>(x_std.real(), x_std.imag());
   return is;
 }
 
