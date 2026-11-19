@@ -496,7 +496,8 @@ KOKKOS_INLINE_FUNCTION constexpr bool operator!=(
 
 //! Binary + operator for complex complex.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator+(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(x.real() + y.real(),
                                                            x.imag() + y.imag());
@@ -504,7 +505,8 @@ operator+(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
 
 //! Binary + operator for complex scalar.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator+(const complex<RealType1>& x, const RealType2& y) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(x.real() + y,
                                                            x.imag());
@@ -512,7 +514,8 @@ operator+(const complex<RealType1>& x, const RealType2& y) noexcept {
 
 //! Binary + operator for scalar complex.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator+(const RealType1& x, const complex<RealType2>& y) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(x + y.real(),
                                                            y.imag());
@@ -520,14 +523,15 @@ operator+(const RealType1& x, const complex<RealType2>& y) noexcept {
 
 //! Unary + operator for complex.
 template <class RealType>
-KOKKOS_INLINE_FUNCTION complex<RealType> operator+(
+KOKKOS_INLINE_FUNCTION constexpr complex<RealType> operator+(
     const complex<RealType>& x) noexcept {
   return complex<RealType>{+x.real(), +x.imag()};
 }
 
 //! Binary - operator for complex.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator-(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(x.real() - y.real(),
                                                            x.imag() - y.imag());
@@ -535,7 +539,8 @@ operator-(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
 
 //! Binary - operator for complex scalar.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator-(const complex<RealType1>& x, const RealType2& y) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(x.real() - y,
                                                            x.imag());
@@ -543,7 +548,8 @@ operator-(const complex<RealType1>& x, const RealType2& y) noexcept {
 
 //! Binary - operator for scalar complex.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator-(const RealType1& x, const complex<RealType2>& y) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(x - y.real(),
                                                            -y.imag());
@@ -551,14 +557,15 @@ operator-(const RealType1& x, const complex<RealType2>& y) noexcept {
 
 //! Unary - operator for complex.
 template <class RealType>
-KOKKOS_INLINE_FUNCTION complex<RealType> operator-(
+KOKKOS_INLINE_FUNCTION constexpr complex<RealType> operator-(
     const complex<RealType>& x) noexcept {
   return complex<RealType>(-x.real(), -x.imag());
 }
 
 //! Binary * operator for complex.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator*(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(
       x.real() * y.real() - x.imag() * y.imag(),
@@ -574,7 +581,7 @@ operator*(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
 /// std::complex's methods and nonmember functions are not marked as
 /// CUDA device functions.
 template <class RealType1, class RealType2>
-inline complex<std::common_type_t<RealType1, RealType2>> operator*(
+constexpr complex<std::common_type_t<RealType1, RealType2>> operator*(
     const std::complex<RealType1>& x, const complex<RealType2>& y) {
   return complex<std::common_type_t<RealType1, RealType2>>(
       x.real() * y.real() - x.imag() * y.imag(),
@@ -586,7 +593,8 @@ inline complex<std::common_type_t<RealType1, RealType2>> operator*(
 /// This function exists because the compiler doesn't know that
 /// RealType and complex<RealType> commute with respect to operator*.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator*(const RealType1& x, const complex<RealType2>& y) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(x * y.real(),
                                                            x * y.imag());
@@ -597,7 +605,8 @@ operator*(const RealType1& x, const complex<RealType2>& y) noexcept {
 /// This function exists because the compiler doesn't know that
 /// RealType and complex<RealType> commute with respect to operator*.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator*(const complex<RealType1>& y, const RealType2& x) noexcept {
   return complex<std::common_type_t<RealType1, RealType2>>(x * y.real(),
                                                            x * y.imag());
@@ -875,7 +884,8 @@ inline complex<RealType> exp(const std::complex<RealType>& c) {
 
 //! Binary operator / for complex and real numbers
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION complex<std::common_type_t<RealType1, RealType2>>
+KOKKOS_INLINE_FUNCTION constexpr complex<
+    std::common_type_t<RealType1, RealType2>>
 operator/(const complex<RealType1>& x,
           const RealType2& y) noexcept(noexcept(RealType1{} / RealType2{})) {
   return complex<std::common_type_t<RealType1, RealType2>>(real(x) / y,

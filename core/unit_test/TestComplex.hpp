@@ -923,6 +923,52 @@ constexpr bool test_complex_conj() {
 }
 static_assert(test_complex_conj());
 
+// The non-member arithmetic operators can appear in constant expressions.
+// Division by a complex number is not covered: Impl::complex_divide is not
+// constexpr yet.  All results are exact in float and double.
+template <class T>
+constexpr bool test_arithmetic_in_constant_expression() {
+  using C = Kokkos::complex<T>;
+  constexpr C a(T(1), T(2));
+  constexpr C b(T(3), T(4));
+
+  static_assert(+a == a);
+  static_assert(-a == C(T(-1), T(-2)));
+
+  static_assert(a + b == C(T(4), T(6)));
+  static_assert(a + T(1) == C(T(2), T(2)));
+  static_assert(T(1) + a == C(T(2), T(2)));
+
+  static_assert(a - b == C(T(-2), T(-2)));
+  static_assert(a - T(1) == C(T(0), T(2)));
+  static_assert(T(1) - a == C(T(0), T(-2)));
+
+  static_assert(a * b == C(T(-5), T(10)));
+  static_assert(a * T(2) == C(T(2), T(4)));
+  static_assert(T(2) * a == C(T(2), T(4)));
+
+  static_assert(a / T(2) == C(T(0.5), T(1)));
+
+  return true;
+}
+static_assert(test_arithmetic_in_constant_expression<float>());
+static_assert(test_arithmetic_in_constant_expression<double>());
+
+// Mixed precision and mixed operand types (a Kokkos extension).
+static_assert(Kokkos::complex<float>(1, 2) * Kokkos::complex<double>(3, 4) ==
+              Kokkos::complex<double>(-5, 10));
+static_assert(std::is_same_v<decltype(Kokkos::complex<float>(1, 2) +
+                                      Kokkos::complex<double>(3, 4)),
+                             Kokkos::complex<double>>);
+static_assert(2 * Kokkos::complex<double>(1, 2) ==
+              Kokkos::complex<double>(2, 4));
+static_assert(Kokkos::complex<float>(1, 2) - 1.0 ==
+              Kokkos::complex<double>(0, 2));
+
+// std::complex times Kokkos::complex (host only).
+static_assert(std::complex<double>(1, 2) * Kokkos::complex<double>(3, 4) ==
+              Kokkos::complex<double>(-5, 10));
+
 }  // namespace Test
 
 #ifdef KOKKOS_COMPILER_NVCC
