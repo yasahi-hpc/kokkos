@@ -622,6 +622,98 @@ TEST(TEST_CATEGORY, complex_division) {
   TestComplexDivision<double, TEST_EXECSPACE>().testit();
 }
 
+// Complex multiplication: C99 Annex G (G.5.1) recovery of infinities when
+// both parts of the usual formula are NaN, compared with std::complex.  Each
+// case is computed with both operator* and operator*=.
+template <class RealType, class ExecSpace>
+struct TestComplexMultiplication {
+  using C                       = Kokkos::complex<RealType>;
+  static constexpr int N        = 6;
+  static constexpr RealType inf = Kokkos::Experimental::infinity_v<RealType>;
+  static constexpr RealType nan = Kokkos::Experimental::quiet_NaN_v<RealType>;
+  static constexpr RealType huge =
+      Kokkos::Experimental::finite_max_v<RealType> / 4;
+
+  Kokkos::View<C *[2], ExecSpace> d_in;
+  Kokkos::View<C *[2], ExecSpace> d_out;    // x * y, x *= y
+  Kokkos::View<C[1], ExecSpace> d_formula;  // textbook formula for case N-1
+
+  TestComplexMultiplication()
+      : d_in("in", N), d_out("out", N), d_formula("formula") {}
+
+  KOKKOS_FUNCTION void operator()(int i) const {
+    const C x   = d_in(i, 0);
+    const C y   = d_in(i, 1);
+    d_out(i, 0) = x * y;
+    C z         = x;
+    z *= y;
+    d_out(i, 1) = z;
+    if (i == N - 1) {
+      d_formula(0) = C(x.real() * y.real() - x.imag() * y.imag(),
+                       x.real() * y.imag() + x.imag() * y.real());
+    }
+  }
+
+  void testit() {
+    const C num[N] = {C(inf, nan),   // infinite left operand
+                      C(inf, inf),   // infinite left operand
+                      C(1, 0),       // infinite right operand
+                      C(nan, 0),     // stays (nan, nan)
+                      C(huge, nan),  // overflowing partial products
+                      C(RealType(1.5), RealType(2.5))};  // ordinary values
+    const C den[N] = {C(1, 0),   C(1, 0),    C(inf, nan),
+                      C(inf, 0), C(huge, 1), C(RealType(3.25), RealType(5.75))};
+    auto h_in      = Kokkos::create_mirror_view(d_in);
+    for (int i = 0; i < N; ++i) {
+      h_in(i, 0) = num[i];
+      h_in(i, 1) = den[i];
+    }
+    Kokkos::deep_copy(d_in, h_in);
+    Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, N), *this);
+    auto h_out =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
+    auto h_formula =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_formula);
+
+    // Same value and sign, or both NaN.
+    auto same = [](RealType v, RealType e) {
+      return (std::isnan(v) && std::isnan(e)) ||
+             (v == e && std::signbit(v) == std::signbit(e));
+    };
+    for (int j = 0; j < 2; ++j) {
+      SCOPED_TRACE(j == 0 ? "operator*" : "operator*=");
+      for (int i = 0; i < N - 1; ++i) {
+        const std::complex<RealType> e =
+            std::complex<RealType>(num[i].real(), num[i].imag()) *
+            std::complex<RealType>(den[i].real(), den[i].imag());
+        SCOPED_TRACE(::testing::Message() << num[i] << " * " << den[i]);
+        EXPECT_TRUE(same(h_out(i, j).real(), e.real())) << h_out(i, j);
+        EXPECT_TRUE(same(h_out(i, j).imag(), e.imag())) << h_out(i, j);
+      }
+      // The recovered values themselves (not only agreement with std).
+      EXPECT_EQ(h_out(0, j).real(), inf);
+      EXPECT_TRUE(std::isnan(h_out(0, j).imag()));
+      EXPECT_EQ(h_out(1, j), C(inf, inf));
+      EXPECT_EQ(h_out(2, j).real(), inf);
+      EXPECT_TRUE(std::isnan(h_out(3, j).real()) &&
+                  std::isnan(h_out(3, j).imag()));
+      EXPECT_EQ(h_out(4, j), C(inf, inf));
+      // Ordinary values: bit-identical to the textbook formula.
+      EXPECT_EQ(h_out(N - 1, j), h_formula(0));
+    }
+
+    // std::complex * Kokkos::complex (host only) recovers the same way.
+    const C h = std::complex<RealType>(inf, nan) * C(1, 0);
+    EXPECT_EQ(h.real(), inf);
+    EXPECT_TRUE(std::isnan(h.imag()));
+  }
+};
+
+TEST(TEST_CATEGORY, complex_multiplication) {
+  TestComplexMultiplication<float, TEST_EXECSPACE>().testit();
+  TestComplexMultiplication<double, TEST_EXECSPACE>().testit();
+}
+
 static_assert(std::is_trivially_copyable_v<Kokkos::complex<float>>);
 static_assert(std::is_trivially_copyable_v<Kokkos::complex<double>>);
 #ifndef KOKKOS_IMPL_32BIT  // FIXME_32BIT

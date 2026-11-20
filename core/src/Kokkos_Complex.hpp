@@ -178,6 +178,79 @@ KOKKOS_INLINE_FUNCTION constexpr void complex_divide(
   im = y;
 }
 
+// Not constexpr: calling it during constant evaluation makes the expression
+// not constant, and the name says why.
+KOKKOS_INLINE_FUNCTION void
+complex_multiplication_of_inf_or_nan_is_not_a_constant_expression() {}
+
+/// \brief Complex multiplication (a + ib) (c + id) = re + i im.
+///
+/// The usual formula (ac - bd) + i(ad + bc).  At run time, when both parts
+/// are NaN, the infinities are recovered as specified by C99 Annex G (G.5.1)
+/// and done by libgcc's and compiler-rt's __muldc3, libc++ and libcu++: e.g.
+/// (inf, nan) * (1, 0) is (inf, nan), not (nan, nan).  Finite operands never
+/// get there, so they only pay for the two isnan tests.
+///
+/// During constant evaluation the operands must be finite; for those the
+/// result is the same as at run time (up to contraction at run time).
+template <class T>
+KOKKOS_INLINE_FUNCTION constexpr void complex_multiply(T a, T b, T c, T d,
+                                                       T& re, T& im) noexcept {
+#if defined(__cpp_if_consteval)  // since C++23
+  if consteval {
+#else
+  if (__builtin_is_constant_evaluated()) {
+#endif
+    constexpr T inf = Kokkos::infinity_v<T>;
+    auto finite     = [](T v) { return v == v && v != inf && v != -inf; };
+    if (!(finite(a) && finite(b) && finite(c) && finite(d))) {
+      complex_multiplication_of_inf_or_nan_is_not_a_constant_expression();
+    }
+    re = a * c - b * d;
+    im = a * d + b * c;
+    return;
+  }
+
+  // Same expressions as before the recovery was added, so that the rounding
+  // (and floating-point contraction) of ordinary values is unchanged.
+  T x = a * c - b * d;
+  T y = a * d + b * c;
+  if (Kokkos::isnan(x) && Kokkos::isnan(y)) {
+    // Replace infinite operands by +-1 and NaN partners by +-0, then scale.
+    bool recalc = false;
+    if (Kokkos::isinf(a) || Kokkos::isinf(b)) {
+      a = Kokkos::copysign(Kokkos::isinf(a) ? T(1) : T(0), a);
+      b = Kokkos::copysign(Kokkos::isinf(b) ? T(1) : T(0), b);
+      if (Kokkos::isnan(c)) c = Kokkos::copysign(T(0), c);
+      if (Kokkos::isnan(d)) d = Kokkos::copysign(T(0), d);
+      recalc = true;
+    }
+    if (Kokkos::isinf(c) || Kokkos::isinf(d)) {
+      c = Kokkos::copysign(Kokkos::isinf(c) ? T(1) : T(0), c);
+      d = Kokkos::copysign(Kokkos::isinf(d) ? T(1) : T(0), d);
+      if (Kokkos::isnan(a)) a = Kokkos::copysign(T(0), a);
+      if (Kokkos::isnan(b)) b = Kokkos::copysign(T(0), b);
+      recalc = true;
+    }
+    if (!recalc && (Kokkos::isinf(a * c) || Kokkos::isinf(b * d) ||
+                    Kokkos::isinf(a * d) || Kokkos::isinf(b * c))) {
+      // Overflowing partial products: recover infinities from them.
+      if (Kokkos::isnan(a)) a = Kokkos::copysign(T(0), a);
+      if (Kokkos::isnan(b)) b = Kokkos::copysign(T(0), b);
+      if (Kokkos::isnan(c)) c = Kokkos::copysign(T(0), c);
+      if (Kokkos::isnan(d)) d = Kokkos::copysign(T(0), d);
+      recalc = true;
+    }
+    if (recalc) {
+      constexpr T inf = Kokkos::infinity_v<T>;
+      x               = inf * (a * c - b * d);
+      y               = inf * (a * d + b * c);
+    }
+  }
+  re = x;
+  im = y;
+}
+
 }  // namespace Impl
 
 /// \class complex
@@ -325,10 +398,7 @@ class
 
   constexpr KOKKOS_INLINE_FUNCTION complex& operator*=(
       const complex<RealType>& src) noexcept {
-    const RealType realPart = re_ * src.re_ - im_ * src.im_;
-    const RealType imagPart = re_ * src.im_ + im_ * src.re_;
-    re_                     = realPart;
-    im_                     = imagPart;
+    Impl::complex_multiply(re_, im_, src.re_, src.im_, re_, im_);
     return *this;
   }
 
@@ -616,9 +686,12 @@ template <class RealType1, class RealType2>
 KOKKOS_INLINE_FUNCTION constexpr complex<
     std::common_type_t<RealType1, RealType2>>
 operator*(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
-  return complex<std::common_type_t<RealType1, RealType2>>(
-      x.real() * y.real() - x.imag() * y.imag(),
-      x.real() * y.imag() + x.imag() * y.real());
+  using common_real_type = std::common_type_t<RealType1, RealType2>;
+  common_real_type re{};
+  common_real_type im{};
+  Impl::complex_multiply<common_real_type>(x.real(), x.imag(), y.real(),
+                                           y.imag(), re, im);
+  return complex<common_real_type>(re, im);
 }
 
 /// \brief Binary * operator for std::complex and complex.
@@ -632,9 +705,12 @@ operator*(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
 template <class RealType1, class RealType2>
 constexpr complex<std::common_type_t<RealType1, RealType2>> operator*(
     const std::complex<RealType1>& x, const complex<RealType2>& y) {
-  return complex<std::common_type_t<RealType1, RealType2>>(
-      x.real() * y.real() - x.imag() * y.imag(),
-      x.real() * y.imag() + x.imag() * y.real());
+  using common_real_type = std::common_type_t<RealType1, RealType2>;
+  common_real_type re{};
+  common_real_type im{};
+  Impl::complex_multiply<common_real_type>(x.real(), x.imag(), y.real(),
+                                           y.imag(), re, im);
+  return complex<common_real_type>(re, im);
 }
 
 /// \brief Binary * operator for RealType times complex.
