@@ -786,6 +786,41 @@ KOKKOS_INLINE_FUNCTION constexpr Impl::promote_t<ArithmeticType> norm(
   return static_cast<Impl::promote_t<ArithmeticType>>(x) * x;
 }
 
+//! Phase angle of a complex number, in [-pi, pi].
+template <class RealType>
+KOKKOS_INLINE_FUNCTION RealType arg(const complex<RealType>& x) {
+  return Kokkos::atan2(x.imag(), x.real());
+}
+
+//! Phase angle of a real number, as of complex(x): atan2(+0, x).
+//! Integers are promoted to double; arg(-0.) is pi, as for std::arg.
+template <class ArithmeticType>
+KOKKOS_INLINE_FUNCTION Impl::promote_t<ArithmeticType> arg(ArithmeticType x) {
+  using type = Impl::promote_t<ArithmeticType>;
+  return Kokkos::atan2(type(0), static_cast<type>(x));
+}
+
+//! Projection onto the Riemann sphere: complex infinities map to
+//! (inf, copysign(0, imag(x))), every other value to itself.
+template <class RealType>
+KOKKOS_INLINE_FUNCTION complex<RealType> proj(const complex<RealType>& x) {
+  if (Kokkos::isinf(x.real()) || Kokkos::isinf(x.imag())) {
+    // A local copy: binding infinity_v to the const& parameter would odr-use
+    // a host-only variable in device code.
+    constexpr RealType inf = Kokkos::infinity_v<RealType>;
+    return complex<RealType>(inf, Kokkos::copysign(RealType(0), x.imag()));
+  }
+  return x;
+}
+
+//! Projection of a real number, as of complex(x): +inf for +-inf.
+//! Integers are promoted to double.
+template <class ArithmeticType>
+KOKKOS_INLINE_FUNCTION complex<Impl::promote_t<ArithmeticType>> proj(
+    ArithmeticType x) {
+  return proj(complex<Impl::promote_t<ArithmeticType>>(x));
+}
+
 //! Exponential of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION complex<RealType> exp(const complex<RealType>& x) {

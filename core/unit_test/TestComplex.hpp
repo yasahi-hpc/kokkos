@@ -696,6 +696,102 @@ TEST(TEST_CATEGORY, complex_operations_arithmetic_types_overloads) {
       (std::is_same_v<decltype(Kokkos::conj(3.)), Kokkos::complex<double>>));
   static_assert((std::is_same_v<decltype(Kokkos::conj(4.l)),
                                 Kokkos::complex<long double>>));
+
+  static_assert((std::is_same_v<decltype(Kokkos::arg(1)), double>));
+  static_assert((std::is_same_v<decltype(Kokkos::arg(2.f)), float>));
+  static_assert((std::is_same_v<decltype(Kokkos::arg(3.)), double>));
+  static_assert((std::is_same_v<decltype(Kokkos::arg(4.l)), long double>));
+  EXPECT_EQ(Kokkos::arg(1), 0.);
+  EXPECT_DOUBLE_EQ(Kokkos::arg(-1), std::arg(-1.));  // pi
+
+  static_assert(
+      (std::is_same_v<decltype(Kokkos::proj(1)), Kokkos::complex<double>>));
+  static_assert(
+      (std::is_same_v<decltype(Kokkos::proj(2.f)), Kokkos::complex<float>>));
+  static_assert(
+      (std::is_same_v<decltype(Kokkos::proj(3.)), Kokkos::complex<double>>));
+  EXPECT_EQ(Kokkos::proj(1), Kokkos::complex<double>(1));
+}
+
+// arg and proj, for complex numbers and for real numbers, compared with
+// std::arg and std::proj.  The inputs include signed zeros and infinities.
+template <class RealType, class ExecSpace>
+struct TestComplexArgProj {
+  using C                       = Kokkos::complex<RealType>;
+  static constexpr int N        = 13;
+  static constexpr RealType inf = Kokkos::Experimental::infinity_v<RealType>;
+
+  Kokkos::View<C *, ExecSpace> d_in;
+  Kokkos::View<RealType *, ExecSpace> d_arg;
+  Kokkos::View<C *, ExecSpace> d_proj;
+  Kokkos::View<RealType[3], ExecSpace> d_arg_real;  // arg(-2), arg(-0.), arg(3)
+  Kokkos::View<C[2], ExecSpace> d_proj_real;        // proj(-inf), proj(2)
+
+  TestComplexArgProj()
+      : d_in("in", N),
+        d_arg("arg", N),
+        d_proj("proj", N),
+        d_arg_real("arg_real"),
+        d_proj_real("proj_real") {}
+
+  KOKKOS_FUNCTION void operator()(int i) const {
+    d_arg(i)  = Kokkos::arg(d_in(i));
+    d_proj(i) = Kokkos::proj(d_in(i));
+    if (i == 0) {
+      d_arg_real(0)  = Kokkos::arg(-RealType(2));
+      d_arg_real(1)  = Kokkos::arg(-RealType(0));
+      d_arg_real(2)  = Kokkos::arg(RealType(3));
+      d_proj_real(0) = Kokkos::proj(-inf);
+      d_proj_real(1) = Kokkos::proj(RealType(2));
+    }
+  }
+
+  void testit() {
+    const RealType z = 0;
+    const C in[N]    = {C(1, 1),    C(-1, z),   C(-1, -z),  C(z, z),
+                        C(-z, z),   C(z, -z),   C(-z, -z),  C(3, -4),
+                        C(inf, -1), C(1, -inf), C(-inf, 2), C(-inf, -inf),
+                        C(-z, -3)};
+    auto h_in        = Kokkos::create_mirror_view(d_in);
+    for (int i = 0; i < N; ++i) h_in(i) = in[i];
+    Kokkos::deep_copy(d_in, h_in);
+
+    Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, N), *this);
+    auto h_arg =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_arg);
+    auto h_proj =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_proj);
+    auto h_arg_real =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_arg_real);
+    auto h_proj_real =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_proj_real);
+
+    // atan2 on the device may differ from the host libm in the last bit.
+    const RealType tol = 2 * Kokkos::Experimental::epsilon_v<RealType> * 4;
+    auto same = [](RealType x, RealType y) {  // equal, and same sign of zero
+      return x == y && std::signbit(x) == std::signbit(y);
+    };
+    for (int i = 0; i < N; ++i) {
+      const std::complex<RealType> s(in[i].real(), in[i].imag());
+      SCOPED_TRACE(::testing::Message() << "z = " << in[i]);
+      EXPECT_NEAR(h_arg(i), std::arg(s), tol);
+      EXPECT_EQ(std::signbit(h_arg(i)), std::signbit(std::arg(s)));
+      const std::complex<RealType> p = std::proj(s);
+      EXPECT_TRUE(same(h_proj(i).real(), p.real())) << h_proj(i);
+      EXPECT_TRUE(same(h_proj(i).imag(), p.imag())) << h_proj(i);
+    }
+    EXPECT_NEAR(h_arg_real(0), std::arg(-RealType(2)), tol);
+    EXPECT_NEAR(h_arg_real(1), std::arg(-RealType(0)), tol);  // pi
+    EXPECT_EQ(h_arg_real(2), RealType(0));
+    EXPECT_TRUE(same(h_proj_real(0).real(), inf));
+    EXPECT_TRUE(same(h_proj_real(0).imag(), RealType(0)));  // +0
+    EXPECT_EQ(h_proj_real(1), C(2, 0));
+  }
+};
+
+TEST(TEST_CATEGORY, complex_arg_proj) {
+  TestComplexArgProj<float, TEST_EXECSPACE>().testit();
+  TestComplexArgProj<double, TEST_EXECSPACE>().testit();
 }
 
 template <class ExecSpace>
