@@ -330,6 +330,10 @@ TEST(TEST_CATEGORY, numeric_traits_digits10) {
 }
 
 TEST(TEST_CATEGORY, numeric_traits_max_digits10) {
+  TestNumericTraits<TEST_EXECSPACE, Kokkos::Experimental::half_t,
+                    MaxDigits10>();
+  TestNumericTraits<TEST_EXECSPACE, Kokkos::Experimental::bhalf_t,
+                    MaxDigits10>();
   TestNumericTraits<TEST_EXECSPACE, float, MaxDigits10>();
   TestNumericTraits<TEST_EXECSPACE, double, MaxDigits10>();
   TestNumericTraits<TEST_EXECSPACE, long double, MaxDigits10>();
@@ -372,6 +376,14 @@ TEST(TEST_CATEGORY, numeric_traits_min_max_exponent) {
 }
 
 TEST(TEST_CATEGORY, numeric_traits_min_max_exponent10) {
+  TestNumericTraits<TEST_EXECSPACE, Kokkos::Experimental::half_t,
+                    MinExponent10>();
+  TestNumericTraits<TEST_EXECSPACE, Kokkos::Experimental::half_t,
+                    MaxExponent10>();
+  TestNumericTraits<TEST_EXECSPACE, Kokkos::Experimental::bhalf_t,
+                    MinExponent10>();
+  TestNumericTraits<TEST_EXECSPACE, Kokkos::Experimental::bhalf_t,
+                    MaxExponent10>();
   TestNumericTraits<TEST_EXECSPACE, float, MinExponent10>();
   TestNumericTraits<TEST_EXECSPACE, float, MaxExponent10>();
   TestNumericTraits<TEST_EXECSPACE, double, MinExponent10>();
@@ -742,6 +754,12 @@ static_assert(
     Kokkos::Experimental::min_exponent_v<Kokkos::Experimental::half_t> == -13);
 static_assert(
     Kokkos::Experimental::max_exponent_v<Kokkos::Experimental::half_t> == 16);
+static_assert(
+    Kokkos::Experimental::max_digits10_v<Kokkos::Experimental::half_t> == 5);
+static_assert(
+    Kokkos::Experimental::min_exponent10_v<Kokkos::Experimental::half_t> == -4);
+static_assert(
+    Kokkos::Experimental::max_exponent10_v<Kokkos::Experimental::half_t> == 4);
 #endif
 #if !KOKKOS_BHALF_T_IS_FLOAT
 static_assert(Kokkos::Experimental::digits_v<Kokkos::Experimental::bhalf_t> ==
@@ -755,6 +773,14 @@ static_assert(
     -125);
 static_assert(
     Kokkos::Experimental::max_exponent_v<Kokkos::Experimental::bhalf_t> == 128);
+static_assert(
+    Kokkos::Experimental::max_digits10_v<Kokkos::Experimental::bhalf_t> == 4);
+static_assert(
+    Kokkos::Experimental::min_exponent10_v<Kokkos::Experimental::bhalf_t> ==
+    -37);
+static_assert(
+    Kokkos::Experimental::max_exponent10_v<Kokkos::Experimental::bhalf_t> ==
+    38);
 #endif
 
 #ifdef KOKKOS_COMPILER_NVCC

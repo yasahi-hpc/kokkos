@@ -254,6 +254,25 @@ struct Kokkos::Impl::max_exponent_helper<
     Kokkos::Experimental::half_t> {
   static constexpr int value = 16;
 };
+/// \brief: Number of base-10 digits needed to represent every half
+///         uniquely: ceil(1 + digits * log10(2)) = ceil(4.31) = 5,
+///         as numeric_limits<std::float16_t>::max_digits10.
+template <>
+struct Kokkos::Impl::max_digits10_helper<Kokkos::Experimental::half_t> {
+  static constexpr int value = 5;
+};
+/// \brief: Smallest power of 10 that is a normalized half:
+///         ceil(log10(norm_min)) = ceil(log10(6.10e-5)) = -4.
+template <>
+struct Kokkos::Impl::min_exponent10_helper<Kokkos::Experimental::half_t> {
+  static constexpr int value = -4;
+};
+/// \brief: Largest power of 10 that is a finite half:
+///         floor(log10(finite_max)) = floor(log10(65504)) = 4.
+template <>
+struct Kokkos::Impl::max_exponent10_helper<Kokkos::Experimental::half_t> {
+  static constexpr int value = 4;
+};
 #endif
 ////////////// END HALF_T (binary16) limits //////////////
 
@@ -349,6 +368,25 @@ template <>
 struct Kokkos::Impl::max_exponent_helper<
     Kokkos::Experimental::bhalf_t> {
   static constexpr int value = 128;
+};
+// Number of base-10 digits needed to represent every bhalf uniquely:
+// ceil(1 + digits * log10(2)) = ceil(3.41) = 4, as
+// numeric_limits<std::bfloat16_t>::max_digits10.
+template <>
+struct Kokkos::Impl::max_digits10_helper<Kokkos::Experimental::bhalf_t> {
+  static constexpr int value = 4;
+};
+// Smallest power of 10 that is a normalized bhalf:
+// ceil(log10(norm_min)) = ceil(log10(1.18e-38)) = -37.
+template <>
+struct Kokkos::Impl::min_exponent10_helper<Kokkos::Experimental::bhalf_t> {
+  static constexpr int value = -37;
+};
+// Largest power of 10 that is a finite bhalf:
+// floor(log10(finite_max)) = floor(log10(3.39e38)) = 38.
+template <>
+struct Kokkos::Impl::max_exponent10_helper<Kokkos::Experimental::bhalf_t> {
+  static constexpr int value = 38;
 };
 #endif
 ////////////// END BHALF_T (bfloat16) limits //////////
