@@ -8,8 +8,8 @@
 #include <Kokkos_BitManipulation.hpp>  // bit_cast
 
 #include <type_traits>
-#include <iosfwd>  // istream & ostream for extraction and insertion ops
-#include <string>
+#include <istream>  // extraction and insertion operators
+#include <ostream>
 #include <cstdint>
 
 #if defined(KOKKOS_ENABLE_CUDA)
@@ -374,7 +374,7 @@ class alignas(FloatType) floating_point_wrapper {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     tmp.val = +tmp.val;
 #else
-    tmp.val   = cast_to_wrapper(+cast_from_wrapper<float>(tmp), val).val;
+    tmp.val = cast_to_wrapper(+cast_from_wrapper<float>(tmp), val).val;
 #endif
     return tmp;
   }
@@ -385,7 +385,7 @@ class alignas(FloatType) floating_point_wrapper {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     tmp.val = -tmp.val;
 #else
-    tmp.val   = cast_to_wrapper(-cast_from_wrapper<float>(tmp), val).val;
+    tmp.val = cast_to_wrapper(-cast_from_wrapper<float>(tmp), val).val;
 #endif
     return tmp;
   }
@@ -398,7 +398,7 @@ class alignas(FloatType) floating_point_wrapper {
 #else
     float tmp = cast_from_wrapper<float>(*this);
     ++tmp;
-    val       = cast_to_wrapper(tmp, val).val;
+    val = cast_to_wrapper(tmp, val).val;
 #endif
     return *this;
   }
@@ -863,17 +863,25 @@ class alignas(FloatType) floating_point_wrapper {
   }
 
   // Insertion and extraction operators
-  friend std::ostream& operator<<(std::ostream& os,
-                                  const floating_point_wrapper& x) {
-    const std::string out = std::to_string(static_cast<double>(x));
-    os << out;
-    return os;
+  // Insertion writes the value as a float: every half and bhalf value is
+  // exactly a float, so the stream's flags, precision and locale apply (as for
+  // std::float16_t, whose insertion goes through float).
+  template <class CharT, class Traits>
+  friend std::basic_ostream<CharT, Traits>& operator<<(
+      std::basic_ostream<CharT, Traits>& os, const floating_point_wrapper& x) {
+    return os << static_cast<float>(x);
   }
 
-  friend std::istream& operator>>(std::istream& is, floating_point_wrapper& x) {
-    std::string in;
-    is >> in;
-    x = std::stod(in);
+  // Extraction reads a double and rounds it once to the half type: reading a
+  // float first would round twice (e.g. "1.000488281250001", just above the
+  // midpoint between 1 and 1 + 2^-10, would become 1).  The number ends where
+  // a double ends, so ')' and ',' stay in the stream; on failure failbit is
+  // set and x is left unchanged, as for the arithmetic types.
+  template <class CharT, class Traits>
+  friend std::basic_istream<CharT, Traits>& operator>>(
+      std::basic_istream<CharT, Traits>& is, floating_point_wrapper& x) {
+    double d;
+    if (is >> d) x = d;
     return is;
   }
 };

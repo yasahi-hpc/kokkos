@@ -13,6 +13,7 @@ import kokkos.core_impl;
 #include <TestDefaultDeviceType_Category.hpp>
 #include <TestHalfConversion.hpp>
 #include <TestHalfOperators.hpp>
+#include <TestHalfIO.hpp>
 
 #if !defined(KOKKOS_ENABLE_CUDA) || defined(__CUDACC__)
 
