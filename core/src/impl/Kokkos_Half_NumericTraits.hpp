@@ -318,18 +318,18 @@ struct Kokkos::Impl::signaling_NaN_helper<
     Kokkos::Experimental::bhalf_t> {
   static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'11111111'0100000};
 };
-// Number of digits in the matissa that can be represented
-// without losing precision.
+// Number of base-RADIX digits in the mantissa: 7 fractional bits plus the
+// implicit leading 1, as numeric_limits<std::bfloat16_t>::digits.
 template <>
 struct Kokkos::Impl::digits_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr int value = 2;
+  static constexpr int value = 8;
 };
-// 7 - 1 * log10(2)
+// floor((digits - 1) * log10(2)) = floor(7 * 0.30103) = 2
 template <>
 struct Kokkos::Impl::digits10_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr int value = 1;
+  static constexpr int value = 2;
 };
 // Value of the base of the exponent representation.
 template <>

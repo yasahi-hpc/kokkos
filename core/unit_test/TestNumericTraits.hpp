@@ -727,6 +727,36 @@ CHECK_BACKWARD_COMPATIBILITY_FLOATING_POINT(max_exponent10);
 #undef CHECK_BACKWARD_COMPATIBILITY_INTEGRAL
 #undef CHECK_BACKWARD_COMPATIBILITY
 
+// Values of the integer traits of the half types, as for
+// std::numeric_limits<std::float16_t> and std::numeric_limits<std::bfloat16_t>
+// (IEEE binary16: 10 + 1 mantissa bits, 5 exponent bits; bfloat16: 7 + 1
+// mantissa bits, 8 exponent bits).  The tests above only check that the traits
+// can be used, not their values: digits_v<bhalf_t> was 2 and digits10_v 1.
+#if !KOKKOS_HALF_T_IS_FLOAT
+static_assert(Kokkos::Experimental::digits_v<Kokkos::Experimental::half_t> ==
+              11);
+static_assert(Kokkos::Experimental::digits10_v<Kokkos::Experimental::half_t> ==
+              3);
+static_assert(Kokkos::Experimental::radix_v<Kokkos::Experimental::half_t> == 2);
+static_assert(
+    Kokkos::Experimental::min_exponent_v<Kokkos::Experimental::half_t> == -13);
+static_assert(
+    Kokkos::Experimental::max_exponent_v<Kokkos::Experimental::half_t> == 16);
+#endif
+#if !KOKKOS_BHALF_T_IS_FLOAT
+static_assert(Kokkos::Experimental::digits_v<Kokkos::Experimental::bhalf_t> ==
+              8);
+static_assert(Kokkos::Experimental::digits10_v<Kokkos::Experimental::bhalf_t> ==
+              2);
+static_assert(Kokkos::Experimental::radix_v<Kokkos::Experimental::bhalf_t> ==
+              2);
+static_assert(
+    Kokkos::Experimental::min_exponent_v<Kokkos::Experimental::bhalf_t> ==
+    -125);
+static_assert(
+    Kokkos::Experimental::max_exponent_v<Kokkos::Experimental::bhalf_t> == 128);
+#endif
+
 #ifdef KOKKOS_COMPILER_NVCC
 #ifdef __NVCC_DIAG_PRAGMA_SUPPORT__
 #pragma nv_diagnostic pop
