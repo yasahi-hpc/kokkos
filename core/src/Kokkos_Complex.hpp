@@ -1100,6 +1100,87 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tanh(
   return Kokkos::complex<RealType>(sh * ch / den, si * ci / den);
 }
 
+namespace Impl {
+
+/// \brief asin and acos of x + iy for finite x >= 0, y >= 0, following
+///   T. E. Hull, T. F. Fairgrieve, P. T. P. Tang, "Implementing the complex
+///   arcsine and arccosine functions using exception handling", ACM TOMS 23
+///   (1997) 299-335.
+///
+/// Gives the real parts of asin and acos and the common magnitude of their
+/// imaginary parts: asin(z) = (re_asin, im), acos(z) = (re_acos, -im).  With
+/// r = |z + 1|, s = |z - 1|, A = (r + s) / 2 >= 1 and B = x / A <= 1:
+/// re_asin = asin(B), re_acos = acos(B), im = log(A + sqrt(A^2 - 1)), each
+/// rewritten where it would lose accuracy (B near 1, A near 1) or overflow or
+/// underflow (|z| huge, y tiny).  Accurate to a few ulps componentwise.
+template <class T>
+KOKKOS_INLINE_FUNCTION void complex_asin_acos(T x, T y, T& re_asin, T& re_acos,
+                                              T& im) {
+  constexpr T eps     = Kokkos::Experimental::epsilon_v<T>;
+  constexpr T big     = Kokkos::Experimental::finite_max_v<T> / 4;
+  constexpr T ln2     = Kokkos::numbers::ln2_v<T>;
+  constexpr T b_cross = T(0.6417);  // crossover points of the paper
+  constexpr T a_cross = T(1.5);
+  if (x > big || y > big) {
+    // r + s could overflow.  Here asin(z) = (atan2(x, y), log(2|z|)) to far
+    // below one ulp; 2|z| = 4 |z / 2| avoids overflow.
+    re_asin = Kokkos::atan2(x, y);
+    re_acos = Kokkos::atan2(y, x);
+    im      = Kokkos::log(Kokkos::hypot(x / 2, y / 2)) + 2 * ln2;
+    return;
+  }
+  const T xp1 = x + T(1);
+  const T r   = Kokkos::hypot(xp1, y);
+  const T s   = Kokkos::hypot(x - T(1), y);
+  const T a   = (r + s) / 2;
+  const T b   = x / a;
+
+  // Real parts.  Near B = 1, asin(B) and acos(B) are ill-conditioned; use
+  // atan of a ratio whose terms are computed without cancellation.
+  if (b <= b_cross) {
+    re_asin = Kokkos::asin(b);
+    re_acos = Kokkos::acos(b);
+  } else if (x <= T(1)) {
+    const T q =
+        Kokkos::sqrt((a + x) / 2 * (y * y / (r + xp1) + (s + (T(1) - x))));
+    re_asin = Kokkos::atan(x / q);
+    re_acos = Kokkos::atan(q / x);
+  } else {
+    const T apx = a + x;
+    const T q =
+        y * Kokkos::sqrt((apx / (r + xp1) + apx / (s + (x - T(1)))) / 2);
+    re_asin = Kokkos::atan(x / q);
+    re_acos = Kokkos::atan(q / x);
+  }
+
+  // Imaginary part.  Near A = 1, A - 1 is computed without cancellation and
+  // log1p is used.
+  if (a <= a_cross) {
+    if (x < T(1)) {
+      // For y small compared with the distance 1 - x to the branch point,
+      // im = y / sqrt(1 - x^2) with a relative error of order (y / (1 - x))^2.
+      // This also avoids the underflow of y^2 for tiny y (1 - x >= eps / 2,
+      // so the right-hand side does not underflow).
+      if (y * y < eps * (T(1) - x) * (T(1) - x)) {
+        im = y / Kokkos::sqrt((T(1) - x) * xp1);
+        return;
+      }
+      const T am1 = (y * y / (r + xp1) + y * y / (s + (T(1) - x))) / 2;
+      im          = Kokkos::log1p(am1 + Kokkos::sqrt(am1 * (a + T(1))));
+    } else {
+      const T am1 = (y * y / (r + xp1) + (s + (x - T(1)))) / 2;
+      im          = Kokkos::log1p(am1 + Kokkos::sqrt(am1 * (a + T(1))));
+    }
+  } else if (a > T(1) / eps) {
+    // sqrt(A^2 - 1) = A to within eps^2 (and A^2 could overflow).
+    im = Kokkos::log(a) + ln2;
+  } else {
+    im = Kokkos::log(a + Kokkos::sqrt((a - T(1)) * (a + T(1))));
+  }
+}
+
+}  // namespace Impl
+
 //! inverse hyperbolic sine of a complex number.
 //! Special values as specified by C99 Annex G (G.6.2.2), as in libc++.
 //! asinh is odd and asinh(conj(z)) = conj(asinh(z)): the formula is evaluated
@@ -1131,9 +1212,14 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asinh(
   // and the imaginary axis between -i and i, where the real part is +-0.
   if (i == RealType()) return C(asinh(r), i);
   if (r == RealType() && Kokkos::fabs(i) <= RealType(1)) return C(r, asin(i));
-  const C w(Kokkos::fabs(r), Kokkos::fabs(i));
-  const C t = log(w + sqrt(w * w + RealType(1.0)));
-  return C(Kokkos::copysign(t.real(), r), Kokkos::copysign(t.imag(), i));
+  // asinh(x + iy) = i asin(y - ix): for x, y >= 0 that is (im, re_asin) of
+  // the Hull-Fairgrieve-Tang algorithm at (y, x).
+  RealType re_asin;
+  RealType re_acos;
+  RealType im;
+  Impl::complex_asin_acos(Kokkos::fabs(i), Kokkos::fabs(r), re_asin, re_acos,
+                          im);
+  return C(Kokkos::copysign(im, r), Kokkos::copysign(re_asin, i));
 }
 
 //! inverse hyperbolic cosine of a complex number.
@@ -1169,10 +1255,14 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acosh(
     return C(RealType(), Kokkos::copysign(acos(r), i));
   }
   if (i == RealType() && r > RealType(1)) return C(acosh(r), i);
-  const C w(r, Kokkos::fabs(i));
-  const C t = RealType(2.0) * log(sqrt(RealType(0.5) * (w + RealType(1.0))) +
-                                  sqrt(RealType(0.5) * (w - RealType(1.0))));
-  return C(Kokkos::fabs(t.real()), Kokkos::copysign(t.imag(), i));
+  // acosh(z) = (-imag(acos(z)), real(acos(z))) for y >= 0, and
+  // acos(-z) = pi - acos(z): the Hull-Fairgrieve-Tang algorithm at (|x|, |y|).
+  RealType re_asin;
+  RealType re_acos;
+  RealType im;
+  Impl::complex_asin_acos(Kokkos::fabs(r), Kokkos::fabs(i), re_asin, re_acos,
+                          im);
+  return C(im, Kokkos::copysign(r < RealType() ? pi - re_acos : re_acos, i));
 }
 
 //! inverse hyperbolic tangent of a complex number.
@@ -1209,20 +1299,28 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> atanh(
   if (Kokkos::fabs(xr) == RealType(1) && xi == RealType()) {
     return C(Kokkos::copysign(inf, xr), Kokkos::copysign(RealType(), xi));
   }
-  const RealType a  = Kokkos::fabs(xr);
-  const RealType b  = Kokkos::fabs(xi);
-  const RealType i2 = b * b;
-  const RealType r  = RealType(1.0) - i2 - a * a;
-
-  RealType p = RealType(1.0) + a;
-  RealType m = RealType(1.0) - a;
-
-  p = i2 + p * p;
-  m = i2 + m * m;
-
-  const RealType phi = atan2(RealType(2.0) * b, r);
-  return C(Kokkos::copysign(RealType(0.25) * (log(p) - log(m)), xr),
-           Kokkos::copysign(RealType(0.5) * phi, xi));
+  // W. Kahan, "Branch cuts for complex elementary functions" (1987), for
+  // a, b >= 0:  real = log1p(4a / ((1 - a)^2 + b^2)) / 4,
+  //             imag = atan2(2b, (1 - a)(1 + a) - b^2) / 2.
+  // 1 - a is exact near a = 1, and no term cancels except where the result
+  // is insensitive to it.
+  const RealType a       = Kokkos::fabs(xr);
+  const RealType b       = Kokkos::fabs(xi);
+  constexpr RealType eps = Kokkos::Experimental::epsilon_v<RealType>;
+  RealType re;
+  RealType im;
+  if (a > RealType(1) / eps || b > RealType(1) / eps) {
+    // atanh(z) = (a / |z|^2, pi/2) to within eps; the squares could overflow.
+    const RealType h = Kokkos::hypot(a, b);
+    re               = (a / h) / h;
+    im               = pi / 2;
+  } else {
+    const RealType am1 = RealType(1) - a;
+    re = Kokkos::log1p(RealType(4) * a / (am1 * am1 + b * b)) / RealType(4);
+    im = Kokkos::atan2(RealType(2) * b, am1 * (RealType(1) + a) - b * b) /
+         RealType(2);
+  }
+  return C(Kokkos::copysign(re, xr), Kokkos::copysign(im, xi));
 }
 
 //! inverse sine of a complex number.
@@ -1259,8 +1357,14 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acos(
   if (r == RealType() && (i == RealType() || Kokkos::isnan(i))) {
     return C(pi / 2, -i);
   }
-  const C t = asin(x);
-  return C(pi / 2 - t.real(), -t.imag());
+  // The Hull-Fairgrieve-Tang algorithm at (|x|, |y|), with
+  // acos(-z) = pi - acos(z) and acos(conj(z)) = conj(acos(z)).
+  RealType re_asin;
+  RealType re_acos;
+  RealType im;
+  Impl::complex_asin_acos(Kokkos::fabs(r), Kokkos::fabs(i), re_asin, re_acos,
+                          im);
+  return C(r < RealType() ? pi - re_acos : re_acos, -Kokkos::copysign(im, i));
 }
 
 //! inverse tangent of a complex number: atan(z) = -i atanh(iz) (C99 G.6), so

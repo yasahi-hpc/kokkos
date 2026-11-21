@@ -28,6 +28,7 @@ import kokkos.core;
 #include <functional>
 #include <iomanip>
 #include <iterator>
+#include <random>
 #include <sstream>
 #include <string>
 
@@ -1260,6 +1261,88 @@ struct TestComplexInverseSpecialValues {
 TEST(TEST_CATEGORY, complex_inverse_special_values) {
   TestComplexInverseSpecialValues<float, TEST_EXECSPACE>().testit();
   TestComplexInverseSpecialValues<double, TEST_EXECSPACE>().testit();
+}
+
+// Componentwise accuracy of the inverse functions for finite arguments in
+// several regimes: ordinary, tiny, huge, and close to the branch points +-1
+// and +-i.  The naive log formulas used before were off by up to 1e18 eps
+// there (or not finite); the reference is std::complex<long double>.
+template <class RealType, class ExecSpace>
+struct TestComplexInverseAccuracy {
+  using C                = Kokkos::complex<RealType>;
+  static constexpr int R = 64;  // inputs per regime
+  static constexpr int N = 5 * R + 1;
+
+  Kokkos::View<C *, ExecSpace> d_in;
+  Kokkos::View<C *[6], ExecSpace> d_out;
+  TestComplexInverseAccuracy() : d_in("in", N), d_out("out", N) {}
+
+  KOKKOS_FUNCTION void operator()(int k) const {
+    const C z   = d_in(k);
+    d_out(k, 0) = Kokkos::asinh(z);
+    d_out(k, 1) = Kokkos::acosh(z);
+    d_out(k, 2) = Kokkos::atanh(z);
+    d_out(k, 3) = Kokkos::asin(z);
+    d_out(k, 4) = Kokkos::acos(z);
+    d_out(k, 5) = Kokkos::atan(z);
+  }
+
+  void testit() {
+    const bool f32 = sizeof(RealType) == 4;
+    std::mt19937_64 g(2026);
+    std::uniform_real_distribution<double> u(-1, 1), off(-15, -1);
+    auto h_in = Kokkos::create_mirror_view(d_in);
+    for (int t = 0; t < R; ++t) {
+      h_in(t)     = C(RealType(2 * u(g)), RealType(2 * u(g)));  // |x|, |y| < 2
+      h_in(R + t) = C(RealType(u(g) * 1e-30), RealType(u(g) * 1e-30));  // tiny
+      const RealType huge = f32 ? RealType(1e37) : RealType(1e300);
+      h_in(2 * R + t)     = C(huge * RealType(u(g)), huge * RealType(u(g)));
+      h_in(3 * R + t) = C(RealType(1e8 * u(g)), RealType(1e8 * u(g)));  // large
+      // Close to a branch point: offsets 10^-15 .. 10^-1 (float: 10^-7 ..).
+      const double bp[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+      const double scale    = f32 ? 0.45 : 1;
+      h_in(4 * R + t) =
+          C(RealType(bp[t % 4][0] + u(g) * std::pow(10., off(g) * scale)),
+            RealType(bp[t % 4][1] + u(g) * std::pow(10., off(g) * scale)));
+    }
+    // Where a too-early small-y approximation was off by 1e15 eps.
+    h_in(N - 1) = f32 ? C(RealType(0.99999994), RealType(1e-7))
+                      : C(0.99999999999999989, 1.9649419124143349e-16);
+    Kokkos::deep_copy(d_in, h_in);
+    Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, N), *this);
+    auto h_out =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
+
+    using L = std::complex<long double>;
+    // A few ulps on the host; device math functions may add an ulp or two.
+    const long double tol = 8 * Kokkos::Experimental::epsilon_v<RealType>;
+    auto rel_ok           = [&](RealType v, long double e) {
+      const RealType et = static_cast<RealType>(e);
+      if (et == 0 || !std::isfinite(et) ||
+          std::abs(et) < Kokkos::Experimental::norm_min_v<RealType>)
+        return true;  // the reference is not representable accurately
+      return std::abs(v - e) <= tol * std::abs(e);
+    };
+    const char *names[6] = {"asinh", "acosh", "atanh", "asin", "acos", "atan"};
+    for (int k = 0; k < N; ++k) {
+      const L z(h_in(k).real(), h_in(k).imag());
+      const L e[6] = {std::asinh(z), std::acosh(z), std::atanh(z),
+                      std::asin(z),  std::acos(z),  std::atan(z)};
+      for (int f = 0; f < 6; ++f) {
+        EXPECT_TRUE(rel_ok(h_out(k, f).real(), e[f].real()) &&
+                    rel_ok(h_out(k, f).imag(), e[f].imag()))
+            << std::setprecision(17) << names[f] << h_in(k) << " = "
+            << h_out(k, f) << ", reference ("
+            << static_cast<double>(e[f].real()) << ","
+            << static_cast<double>(e[f].imag()) << ")";
+      }
+    }
+  }
+};
+
+TEST(TEST_CATEGORY, complex_inverse_accuracy) {
+  TestComplexInverseAccuracy<float, TEST_EXECSPACE>().testit();
+  TestComplexInverseAccuracy<double, TEST_EXECSPACE>().testit();
 }
 
 template <class ExecSpace>
