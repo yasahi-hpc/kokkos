@@ -305,6 +305,21 @@ inline constexpr bool is_complex_value_type_v =
     (std::is_floating_point_v<T> ||
      Kokkos::Experimental::Impl::is_float16<T>::value ||
      Kokkos::Experimental::Impl::is_bfloat16<T>::value);
+// half_t or bhalf_t (not when they are aliases of float).
+template <class T>
+inline constexpr bool is_half_type_v =
+    Kokkos::Experimental::Impl::is_float16<T>::value ||
+    Kokkos::Experimental::Impl::is_bfloat16<T>::value;
+// Whether complex<To>(complex<From>) is explicit.  As for std::complex since
+// C++23 (P1467), a conversion into an extended floating-point type of lower
+// rank (float or double to half_t or bhalf_t) is explicit, and widening ones
+// (half_t to float) are implicit.  Conversions between the standard types
+// stay implicit (std::complex<float>(std::complex<double>) is explicit; making
+// it so in Kokkos would break existing code).  half_t and bhalf_t have no
+// conversion to each other (unordered ranks).
+template <class From, class To>
+inline constexpr bool complex_conversion_is_explicit_v =
+    is_half_type_v<To> && !std::is_same_v<From, To>;
 template <class T, class = void>
 struct complex_promote {};
 template <class T>
@@ -345,14 +360,18 @@ class
   KOKKOS_DEFAULTED_FUNCTION
   complex() = default;
 
-  /// \brief Conversion constructor from compatible RType
-  template <class RType,
-            std::enable_if_t<std::is_convertible_v<RType, RealType>, int> = 0>
-  KOKKOS_INLINE_FUNCTION complex(const complex<RType>& other) noexcept
-      // Intentionally do the conversions implicitly here so that users don't
+  /// \brief Conversion constructor from compatible RType.  Explicit into
+  ///   half_t and bhalf_t (see Impl::complex_conversion_is_explicit_v).
+  template <class RType>
+    requires(std::is_constructible_v<RealType, RType>)
+  KOKKOS_INLINE_FUNCTION constexpr explicit(
+      Impl::complex_conversion_is_explicit_v<RType, RealType>)
+      complex(const complex<RType>& other) noexcept
+      // Intentionally do the conversions explicitly here so that users don't
       // get any warnings about narrowing, etc., that they would expect to get
-      // otherwise.
-      : re_(other.real()), im_(other.imag()) {}
+      // otherwise (and half_t's conversion to float is explicit).
+      : re_(static_cast<RealType>(other.real())),
+        im_(static_cast<RealType>(other.imag())) {}
 
   /// \brief Conversion constructor from std::complex.
   ///
@@ -389,6 +408,18 @@ class
   KOKKOS_INLINE_FUNCTION
   constexpr complex(const RealType& re, const RealType& im) noexcept
       : re_(re), im_(im) {}
+
+  //! Assignment operator from a complex number of another value type, as
+  //! std::complex has: also where the conversion constructor is explicit.
+  template <class RType>
+    requires(!std::is_same_v<RType, RealType> &&
+             std::is_constructible_v<RealType, RType>)
+  KOKKOS_INLINE_FUNCTION constexpr complex& operator=(
+      const complex<RType>& src) noexcept {
+    re_ = static_cast<RealType>(src.real());
+    im_ = static_cast<RealType>(src.imag());
+    return *this;
+  }
 
   //! Assignment operator (from a real number).
   KOKKOS_INLINE_FUNCTION constexpr complex& operator=(

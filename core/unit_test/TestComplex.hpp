@@ -2087,6 +2087,94 @@ TEST(TEST_CATEGORY, complex_half_scalar_promotion) {
 #endif
 }
 
+// Conversions between complex types follow std::complex for the half types
+// (P1467): explicit into half_t and bhalf_t, implicit out of them, none
+// between half_t and bhalf_t.  Assignment works in every direction where a
+// conversion exists, as for std::complex.
+template <class H>
+void test_complex_half_conversions() {
+  using CH = Kokkos::complex<H>;
+  using CF = Kokkos::complex<float>;
+  using CD = Kokkos::complex<double>;
+  static_assert(!std::is_convertible_v<CD, CH>);
+  static_assert(!std::is_convertible_v<CF, CH>);
+  static_assert(std::is_constructible_v<CH, CD>);
+  static_assert(std::is_constructible_v<CH, CF>);
+  static_assert(std::is_convertible_v<CH, CF>);
+  static_assert(std::is_convertible_v<CH, CD>);
+  static_assert(std::is_assignable_v<CH &, CD>);
+  static_assert(std::is_assignable_v<CF &, CH>);
+
+  // Into half: each part is rounded once.  Out of half: exact.
+  const CH n(CD(0.1, -1.0 / 3));
+  EXPECT_EQ(n.real(), H(0.1));
+  EXPECT_EQ(n.imag(), H(-1.0 / 3));
+  const CF w = n;
+  EXPECT_EQ(w.real(), static_cast<float>(n.real()));
+  EXPECT_EQ(w.imag(), static_cast<float>(n.imag()));
+  CH a;
+  a = CD(0.1, -1.0 / 3);
+  EXPECT_EQ(a, n);
+  CD b;
+  b = n;
+  EXPECT_EQ(b, CD(w));
+
+  // Mixed pow converts the half operand to complex<float>.
+  static_assert(std::is_same_v<decltype(Kokkos::pow(CH(), CF())), CF>);
+  const CF p = Kokkos::pow(CH(H(0.f), H(1.f)), CF(2, 0));
+  EXPECT_NEAR(p.real(), -1.f, 1e-6f);
+  EXPECT_NEAR(p.imag(), 0.f, 1e-6f);
+
+  // The same in a kernel.
+  int errors = 0;
+  Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<TEST_EXECSPACE>(0, 1),
+      KOKKOS_LAMBDA(int, int &err) {
+        const CH m(CD(0.1, -1.0 / 3));
+        if (!(m.real() == H(0.1) && m.imag() == H(-1.0 / 3))) ++err;
+        const CF v = m;
+        if (!(v.real() == static_cast<float>(m.real()))) ++err;
+        CH c;
+        c = CD(0.1, -1.0 / 3);
+        if (!(c == m)) ++err;
+      },
+      errors);
+  EXPECT_EQ(errors, 0);
+}
+
+// Between the standard types the conversion stays implicit in both
+// directions (std::complex<float>(std::complex<double>) is explicit; a known
+// divergence), and it is now constexpr.
+static_assert(
+    std::is_convertible_v<Kokkos::complex<double>, Kokkos::complex<float>>);
+static_assert(
+    std::is_convertible_v<Kokkos::complex<float>, Kokkos::complex<double>>);
+static_assert(Kokkos::complex<double>(Kokkos::complex<float>(1.5f, 2.5f)) ==
+              Kokkos::complex<double>(1.5, 2.5));
+static_assert(Kokkos::complex<float>(Kokkos::complex<double>(0.5, -2)) ==
+              Kokkos::complex<float>(0.5f, -2.f));
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE) && \
+    defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+static_assert(
+    !std::is_constructible_v<Kokkos::complex<Kokkos::Experimental::half_t>,
+                             Kokkos::complex<Kokkos::Experimental::bhalf_t>>);
+static_assert(
+    !std::is_constructible_v<Kokkos::complex<Kokkos::Experimental::bhalf_t>,
+                             Kokkos::complex<Kokkos::Experimental::half_t>>);
+static_assert(
+    !std::is_assignable_v<Kokkos::complex<Kokkos::Experimental::half_t> &,
+                          Kokkos::complex<Kokkos::Experimental::bhalf_t>>);
+#endif
+
+TEST(TEST_CATEGORY, complex_half_conversions) {
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  test_complex_half_conversions<Kokkos::Experimental::half_t>();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  test_complex_half_conversions<Kokkos::Experimental::bhalf_t>();
+#endif
+}
+
 }  // namespace Test
 
 #ifdef KOKKOS_COMPILER_NVCC
