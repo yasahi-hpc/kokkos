@@ -1031,8 +1031,11 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> cosh(
     // (inf or NaN, +-0).  cosh is even and conj(cosh(z)) = cosh(conj(z)), so
     // the sign of the zero is the product of the signs of r and i.  (For
     // r = +-0 the formula below already gives (1, +-0) with that sign.)
-    return Kokkos::complex<RealType>(Kokkos::fabs(r),
-                                     Kokkos::copysign(RealType(), r) * i);
+    // For a NaN real part the sign is unspecified; i itself, not copysign:
+    // the sign bit of a NaN is not portable (see atanh).
+    return Kokkos::complex<RealType>(
+        Kokkos::fabs(r),
+        Kokkos::isnan(r) ? i : Kokkos::copysign(RealType(), r) * i);
   }
   return Kokkos::complex<RealType>(cosh(r) * cos(i), sinh(r) * sin(i));
 }
@@ -1098,36 +1101,128 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tanh(
 }
 
 //! inverse hyperbolic sine of a complex number.
+//! Special values as specified by C99 Annex G (G.6.2.2), as in libc++.
+//! asinh is odd and asinh(conj(z)) = conj(asinh(z)): the formula is evaluated
+//! for (|x|, |y|) and the signs are restored, which makes the branch cuts
+//! follow the sign of a zero real part and avoids the cancellation in
+//! z + sqrt(z^2 + 1) for negative real parts.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asinh(
     const complex<RealType>& x) {
-  return log(x + sqrt(x * x + RealType(1.0)));
+  using C               = Kokkos::complex<RealType>;
+  const RealType r      = x.real();
+  const RealType i      = x.imag();
+  constexpr RealType pi = Kokkos::numbers::pi_v<RealType>;
+  if (Kokkos::isinf(r)) {
+    if (Kokkos::isnan(i)) return x;  // (+-inf, NaN)
+    if (Kokkos::isinf(i)) return C(r, Kokkos::copysign(pi / 4, i));
+    return C(r, Kokkos::copysign(RealType(), i));  // (+-inf, +-0)
+  }
+  if (Kokkos::isnan(r)) {
+    // (+-inf, NaN), the sign is unspecified; +inf as in glibc.
+    if (Kokkos::isinf(i)) return C(Kokkos::fabs(i), r);
+    if (i == RealType()) return x;  // (NaN, +-0)
+    return C(r, r);
+  }
+  if (Kokkos::isinf(i)) {
+    return C(Kokkos::copysign(i, r), Kokkos::copysign(pi / 2, i));
+  }
+  // On the axes the result is exact with the real functions: a real argument,
+  // and the imaginary axis between -i and i, where the real part is +-0.
+  if (i == RealType()) return C(asinh(r), i);
+  if (r == RealType() && Kokkos::fabs(i) <= RealType(1)) return C(r, asin(i));
+  const C w(Kokkos::fabs(r), Kokkos::fabs(i));
+  const C t = log(w + sqrt(w * w + RealType(1.0)));
+  return C(Kokkos::copysign(t.real(), r), Kokkos::copysign(t.imag(), i));
 }
 
 //! inverse hyperbolic cosine of a complex number.
+//! Special values as specified by C99 Annex G (G.6.2.1), as in libc++.
+//! acosh(conj(z)) = conj(acosh(z)) and its real part is >= 0: the formula is
+//! evaluated for (x, |y|), so that the branch cut on the real axis below 1
+//! follows the sign of a zero imaginary part.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acosh(
     const complex<RealType>& x) {
-  return RealType(2.0) * log(sqrt(RealType(0.5) * (x + RealType(1.0))) +
-                             sqrt(RealType(0.5) * (x - RealType(1.0))));
+  using C               = Kokkos::complex<RealType>;
+  const RealType r      = x.real();
+  const RealType i      = x.imag();
+  constexpr RealType pi = Kokkos::numbers::pi_v<RealType>;
+  if (Kokkos::isinf(r)) {
+    if (Kokkos::isnan(i)) return C(Kokkos::fabs(r), i);  // (+inf, NaN)
+    if (Kokkos::isinf(i)) {
+      return C(Kokkos::fabs(r),
+               Kokkos::copysign(r > RealType() ? pi / 4 : 3 * pi / 4, i));
+    }
+    return C(Kokkos::fabs(r),
+             Kokkos::copysign(r < RealType() ? pi : RealType(), i));
+  }
+  if (Kokkos::isnan(r)) {
+    if (Kokkos::isinf(i)) return C(Kokkos::fabs(i), r);  // (+inf, NaN)
+    return C(r, r);
+  }
+  if (Kokkos::isinf(i)) return C(Kokkos::fabs(i), Kokkos::copysign(pi / 2, i));
+  if (r == RealType() && Kokkos::isnan(i)) return C(i, pi / 2);  // as glibc
+  // On the real axis the result is exact with the real functions: (+0, +-acos)
+  // between -1 and 1, (acosh, +-0) beyond 1.
+  if (i == RealType() && Kokkos::fabs(r) <= RealType(1)) {
+    return C(RealType(), Kokkos::copysign(acos(r), i));
+  }
+  if (i == RealType() && r > RealType(1)) return C(acosh(r), i);
+  const C w(r, Kokkos::fabs(i));
+  const C t = RealType(2.0) * log(sqrt(RealType(0.5) * (w + RealType(1.0))) +
+                                  sqrt(RealType(0.5) * (w - RealType(1.0))));
+  return C(Kokkos::fabs(t.real()), Kokkos::copysign(t.imag(), i));
 }
 
 //! inverse hyperbolic tangent of a complex number.
+//! Special values as specified by C99 Annex G (G.6.2.3), as in libc++.
+//! atanh is odd and atanh(conj(z)) = conj(atanh(z)): the formula is evaluated
+//! for (|x|, |y|) and the signs are restored, so that the branch cuts on the
+//! real axis beyond +-1 follow the sign of a zero imaginary part.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> atanh(
     const complex<RealType>& x) {
-  const RealType i2 = x.imag() * x.imag();
-  const RealType r  = RealType(1.0) - i2 - x.real() * x.real();
+  using C                = Kokkos::complex<RealType>;
+  const RealType xr      = x.real();
+  const RealType xi      = x.imag();
+  constexpr RealType pi  = Kokkos::numbers::pi_v<RealType>;
+  constexpr RealType inf = Kokkos::infinity_v<RealType>;
+  if (Kokkos::isinf(xi)) {
+    // (+-0, +-pi/2).  For a NaN real part the sign of the zero is unspecified;
+    // +0, not copysign: the sign bit of a NaN is not portable (negating a NaN,
+    // as the identity atan(z) = -i atanh(iz) does, keeps the sign on x86 but
+    // may give a canonical NaN on GPUs).
+    return C(Kokkos::isnan(xr) ? RealType() : Kokkos::copysign(RealType(), xr),
+             Kokkos::copysign(pi / 2, xi));
+  }
+  if (Kokkos::isnan(xi)) {
+    if (Kokkos::isinf(xr) || xr == RealType()) {
+      return C(Kokkos::copysign(RealType(), xr), xi);  // (+-0, NaN)
+    }
+    return C(xi, xi);
+  }
+  if (Kokkos::isnan(xr)) return C(xr, xr);
+  if (Kokkos::isinf(xr)) {
+    return C(Kokkos::copysign(RealType(), xr), Kokkos::copysign(pi / 2, xi));
+  }
+  if (Kokkos::fabs(xr) == RealType(1) && xi == RealType()) {
+    return C(Kokkos::copysign(inf, xr), Kokkos::copysign(RealType(), xi));
+  }
+  const RealType a  = Kokkos::fabs(xr);
+  const RealType b  = Kokkos::fabs(xi);
+  const RealType i2 = b * b;
+  const RealType r  = RealType(1.0) - i2 - a * a;
 
-  RealType p = RealType(1.0) + x.real();
-  RealType m = RealType(1.0) - x.real();
+  RealType p = RealType(1.0) + a;
+  RealType m = RealType(1.0) - a;
 
   p = i2 + p * p;
   m = i2 + m * m;
 
-  RealType phi = atan2(RealType(2.0) * x.imag(), r);
-  return Kokkos::complex<RealType>(RealType(0.25) * (log(p) - log(m)),
-                                   RealType(0.5) * phi);
+  const RealType phi = atan2(RealType(2.0) * b, r);
+  return C(Kokkos::copysign(RealType(0.25) * (log(p) - log(m)), xr),
+           Kokkos::copysign(RealType(0.5) * phi, xi));
 }
 
 //! inverse sine of a complex number.
@@ -1140,30 +1235,42 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asin(
 }
 
 //! inverse cosine of a complex number.
+//! Special values as specified by C99 Annex G (G.6.1.1), as in libc++; the
+//! other values as pi/2 - asin(z), which inherits the branch cuts of asin.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acos(
     const complex<RealType>& x) {
-  Kokkos::complex<RealType> t = asin(x);
-  RealType pi_2               = acos(RealType(0.0));
-  return Kokkos::complex<RealType>(pi_2 - t.real(), -t.imag());
+  using C               = Kokkos::complex<RealType>;
+  const RealType r      = x.real();
+  const RealType i      = x.imag();
+  constexpr RealType pi = Kokkos::numbers::pi_v<RealType>;
+  if (Kokkos::isinf(r)) {
+    // (NaN, +-inf), the sign is unspecified; -inf as in glibc.
+    if (Kokkos::isnan(i)) return C(i, -Kokkos::fabs(r));
+    if (Kokkos::isinf(i)) return C(r < RealType() ? 3 * pi / 4 : pi / 4, -i);
+    if (r < RealType()) return C(pi, Kokkos::signbit(i) ? -r : r);
+    return C(RealType(), Kokkos::signbit(i) ? r : -r);
+  }
+  if (Kokkos::isnan(r)) {
+    if (Kokkos::isinf(i)) return C(r, -i);
+    return C(r, r);
+  }
+  if (Kokkos::isinf(i)) return C(pi / 2, -i);
+  if (r == RealType() && (i == RealType() || Kokkos::isnan(i))) {
+    return C(pi / 2, -i);
+  }
+  const C t = asin(x);
+  return C(pi / 2 - t.real(), -t.imag());
 }
 
-//! inverse tangent of a complex number.
+//! inverse tangent of a complex number: atan(z) = -i atanh(iz) (C99 G.6), so
+//! that it inherits the special values and branch cuts of atanh.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> atan(
     const complex<RealType>& x) {
-  const RealType r2 = x.real() * x.real();
-  const RealType i  = RealType(1.0) - r2 - x.imag() * x.imag();
-
-  RealType p = x.imag() + RealType(1.0);
-  RealType m = x.imag() - RealType(1.0);
-
-  p = r2 + p * p;
-  m = r2 + m * m;
-
-  return Kokkos::complex<RealType>(
-      RealType(0.5) * atan2(RealType(2.0) * x.real(), i),
-      RealType(0.25) * log(p / m));
+  const Kokkos::complex<RealType> t =
+      atanh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+  return Kokkos::complex<RealType>(t.imag(), -t.real());
 }
 
 /// This function cannot be called in a CUDA device function,

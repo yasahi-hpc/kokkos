@@ -1130,6 +1130,138 @@ TEST(TEST_CATEGORY, complex_tanh_large_argument) {
   TestComplexTanhLarge<double, TEST_EXECSPACE>().testit();
 }
 
+// The inverse functions on the same grid, compared with std::complex for
+// class, sign and value (asin, atan: class and value, and bitwise against
+// -i asinh(iz) and -i atanh(iz), whose unspecified signs glibc's casin and
+// catan choose differently).
+// Also both sides of every branch cut, and a large negative real part, where
+// z + sqrt(z^2 + 1) cancelled.  The finite grid values are within 3 eps of
+// glibc on the host; the general accuracy of these functions is gap C25.
+template <class RealType, class ExecSpace>
+struct TestComplexInverseSpecialValues {
+  using C                       = Kokkos::complex<RealType>;
+  static constexpr int NV       = 9;
+  static constexpr int N        = NV * NV;
+  static constexpr int NC       = 10;  // branch-cut cases
+  static constexpr RealType inf = Kokkos::Experimental::infinity_v<RealType>;
+  static constexpr RealType nan = Kokkos::Experimental::quiet_NaN_v<RealType>;
+
+  Kokkos::View<C *, ExecSpace> d_in;
+  Kokkos::View<C *[8], ExecSpace> d_out;  // 6 functions, 2 identities
+  Kokkos::View<C[NC], ExecSpace> d_cut;
+  TestComplexInverseSpecialValues()
+      : d_in("in", N), d_out("out", N), d_cut("cut") {}
+
+  KOKKOS_FUNCTION void operator()(int k) const {
+    const C z   = d_in(k);
+    const C iz  = C(-z.imag(), z.real());
+    d_out(k, 0) = Kokkos::asinh(z);
+    d_out(k, 1) = Kokkos::acosh(z);
+    d_out(k, 2) = Kokkos::atanh(z);
+    d_out(k, 3) = Kokkos::asin(z);
+    d_out(k, 4) = Kokkos::acos(z);
+    d_out(k, 5) = Kokkos::atan(z);
+    const C s   = Kokkos::asinh(iz);
+    const C t   = Kokkos::atanh(iz);
+    d_out(k, 6) = C(s.imag(), -s.real());  // -i asinh(iz)
+    d_out(k, 7) = C(t.imag(), -t.real());  // -i atanh(iz)
+    if (k == 0) {
+      const RealType z0 = 0;
+      d_cut(0)          = Kokkos::asin(C(RealType(2.5), z0));
+      d_cut(1)          = Kokkos::asin(C(RealType(2.5), -z0));
+      d_cut(2)          = Kokkos::acos(C(RealType(2.5), z0));
+      d_cut(3)          = Kokkos::acos(C(RealType(2.5), -z0));
+      d_cut(4)          = Kokkos::atanh(C(RealType(2), z0));
+      d_cut(5)          = Kokkos::atanh(C(RealType(2), -z0));
+      d_cut(6)          = Kokkos::acosh(C(RealType(-2), z0));
+      d_cut(7)          = Kokkos::acosh(C(RealType(-2), -z0));
+      d_cut(8)          = Kokkos::asinh(C(-z0, RealType(2.5)));
+      d_cut(9)          = Kokkos::asinh(C(-RealType(1e8), RealType(0.5)));
+    }
+  }
+
+  void testit() {
+    const RealType v[NV] = {
+        0, -RealType(0), 1, -1, RealType(0.5), RealType(2.5), inf, -inf, nan};
+    auto h_in = Kokkos::create_mirror_view(d_in);
+    for (int a = 0; a < NV; ++a)
+      for (int b = 0; b < NV; ++b) h_in(a * NV + b) = C(v[a], v[b]);
+    Kokkos::deep_copy(d_in, h_in);
+    Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, N), *this);
+    auto h_out =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
+    auto h_cut =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_cut);
+
+    auto kind = [](RealType x) {
+      return std::isnan(x) ? 0 : std::isinf(x) ? 1 : x == 0 ? 2 : 3;
+    };
+    const RealType tol = 16 * Kokkos::Experimental::epsilon_v<RealType>;
+    auto check         = [&](RealType x, RealType e, bool with_sign) {
+      if (kind(x) != kind(e)) return false;
+      if (with_sign && kind(x) != 0 && std::signbit(x) != std::signbit(e))
+        return false;
+      return kind(x) != 3 || std::abs(x - e) <= tol * std::abs(e);
+    };
+    auto bitwise = [](C x, C y) {
+      auto same = [](RealType a, RealType b) {
+        return (std::isnan(a) && std::isnan(b)) ||
+               (a == b && std::signbit(a) == std::signbit(b));
+      };
+      return same(x.real(), y.real()) && same(x.imag(), y.imag());
+    };
+    const char *names[6] = {"asinh", "acosh", "atanh", "asin", "acos", "atan"};
+    for (int k = 0; k < N; ++k) {
+      const std::complex<RealType> z(h_in(k).real(), h_in(k).imag());
+      const std::complex<RealType> e[6] = {std::asinh(z), std::acosh(z),
+                                           std::atanh(z), std::asin(z),
+                                           std::acos(z),  std::atan(z)};
+      for (int f = 0; f < 6; ++f) {
+        const bool with_sign = f != 3 && f != 5;
+        EXPECT_TRUE(check(h_out(k, f).real(), e[f].real(), with_sign) &&
+                    check(h_out(k, f).imag(), e[f].imag(), with_sign))
+            << names[f] << h_in(k) << " = " << h_out(k, f) << ", std gives "
+            << e[f];
+      }
+      EXPECT_TRUE(bitwise(h_out(k, 3), h_out(k, 6)))
+          << "asin" << h_in(k) << " differs from -i asinh(iz)";
+      EXPECT_TRUE(bitwise(h_out(k, 5), h_out(k, 7)))
+          << "atan" << h_in(k) << " differs from -i atanh(iz)";
+    }
+
+    // Both sides of each branch cut: the sign of the zero selects the side
+    // (continuity from that side, C99 G.6).
+    const RealType z0                       = 0;
+    const std::complex<RealType> cut_in[NC] = {
+        {RealType(2.5), z0},  {RealType(2.5), -z0},
+        {RealType(2.5), z0},  {RealType(2.5), -z0},
+        {RealType(2), z0},    {RealType(2), -z0},
+        {RealType(-2), z0},   {RealType(-2), -z0},
+        {-z0, RealType(2.5)}, {-RealType(1e8), RealType(0.5)}};
+    const std::complex<RealType> cut_ref[NC] = {
+        std::asin(cut_in[0]),  std::asin(cut_in[1]),  std::acos(cut_in[2]),
+        std::acos(cut_in[3]),  std::atanh(cut_in[4]), std::atanh(cut_in[5]),
+        std::acosh(cut_in[6]), std::acosh(cut_in[7]), std::asinh(cut_in[8]),
+        std::asinh(cut_in[9])};
+    for (int c = 0; c < NC; ++c) {
+      EXPECT_TRUE(check(h_cut(c).real(), cut_ref[c].real(), true) &&
+                  check(h_cut(c).imag(), cut_ref[c].imag(), true))
+          << "case " << c << ": " << h_cut(c) << ", std gives " << cut_ref[c];
+    }
+    // The imaginary parts on the two sides have opposite signs.
+    EXPECT_TRUE(h_cut(0).imag() > 0 && h_cut(1).imag() < 0);  // asin
+    EXPECT_TRUE(h_cut(2).imag() < 0 && h_cut(3).imag() > 0);  // acos
+    EXPECT_TRUE(h_cut(4).imag() > 0 && h_cut(5).imag() < 0);  // atanh
+    EXPECT_TRUE(h_cut(6).imag() > 0 && h_cut(7).imag() < 0);  // acosh
+    EXPECT_TRUE(h_cut(8).real() < 0);                         // asinh
+  }
+};
+
+TEST(TEST_CATEGORY, complex_inverse_special_values) {
+  TestComplexInverseSpecialValues<float, TEST_EXECSPACE>().testit();
+  TestComplexInverseSpecialValues<double, TEST_EXECSPACE>().testit();
+}
+
 template <class ExecSpace>
 struct TestComplexStructuredBindings {
   using exec_space       = ExecSpace;
