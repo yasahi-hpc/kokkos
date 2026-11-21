@@ -19,6 +19,9 @@ half_t cast_to_half(half_t val) { return val; }
 
 KOKKOS_INLINE_FUNCTION
 half_t cast_to_half(float val) { return __float2half(val); }
+// false and true convert to 0 and 1 (exact), as for any floating-point type.
+KOKKOS_INLINE_FUNCTION
+half_t cast_to_half(bool val) { return cast_to_half(static_cast<float>(val)); }
 KOKKOS_INLINE_FUNCTION
 half_t cast_to_half(double val) { return __double2half(val); }
 KOKKOS_INLINE_FUNCTION
@@ -46,6 +49,12 @@ template <class T>
 KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, float>, T>
 cast_from_half(half_t val) {
   return __half2float(__half(val));
+}
+// The boolean conversion: false for +-0, true otherwise (also for NaN).
+template <class T>
+KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, bool>, T>
+cast_from_half(half_t val) {
+  return __half2float(__half(val)) != 0.0f;
 }
 template <class T>
 KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, double>, T>
@@ -230,6 +239,11 @@ KOKKOS_INLINE_FUNCTION
 bhalf_t cast_to_bhalf(bhalf_t val) { return val; }
 KOKKOS_INLINE_FUNCTION
 bhalf_t cast_to_bhalf(float val) { return __float2bfloat16(val); }
+// false and true convert to 0 and 1 (exact), as for any floating-point type.
+KOKKOS_INLINE_FUNCTION
+bhalf_t cast_to_bhalf(bool val) {
+  return cast_to_bhalf(static_cast<float>(val));
+}
 KOKKOS_INLINE_FUNCTION
 bhalf_t cast_to_bhalf(double val) { return __double2bfloat16(val); }
 KOKKOS_INLINE_FUNCTION
@@ -257,6 +271,12 @@ template <class T>
 KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, float>, T>
 cast_from_bhalf(bhalf_t val) {
   return __bfloat162float(__nv_bfloat16(val));
+}
+// The boolean conversion: false for +-0, true otherwise (also for NaN).
+template <class T>
+KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, bool>, T>
+cast_from_bhalf(bhalf_t val) {
+  return __bfloat162float(__nv_bfloat16(val)) != 0.0f;
 }
 template <class T>
 KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, double>, T>
