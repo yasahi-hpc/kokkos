@@ -8,6 +8,7 @@
 #endif
 
 #include <Kokkos_Atomic.hpp>
+#include <Kokkos_MathematicalConstants.hpp>
 #include <Kokkos_MathematicalFunctions.hpp>
 #include <Kokkos_NumericTraits.hpp>
 #include <Kokkos_ReductionIdentity.hpp>
@@ -961,50 +962,139 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> log10(
   return log(x) / log(RealType(10));
 }
 
-//! sine of a complex number.
+//! sine of a complex number: sin(z) = -i sinh(iz) (C99 G.6), so that it
+//! inherits the special values of sinh.  The same products as
+//! (sin(x) cosh(y), cos(x) sinh(y)) for finite arguments.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sin(
     const complex<RealType>& x) {
-  return Kokkos::complex<RealType>(sin(x.real()) * cosh(x.imag()),
-                                   cos(x.real()) * sinh(x.imag()));
+  const Kokkos::complex<RealType> t =
+      sinh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+  return Kokkos::complex<RealType>(t.imag(), -t.real());
 }
 
-//! cosine of a complex number.
+//! cosine of a complex number: cos(z) = cosh(iz) (C99 G.6), so that it
+//! inherits the special values of cosh.  The same products as
+//! (cos(x) cosh(y), -sin(x) sinh(y)) for finite arguments.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> cos(
     const complex<RealType>& x) {
-  return Kokkos::complex<RealType>(cos(x.real()) * cosh(x.imag()),
-                                   -sin(x.real()) * sinh(x.imag()));
+  return cosh(Kokkos::complex<RealType>(-x.imag(), x.real()));
 }
 
-//! tangent of a complex number.
+//! tangent of a complex number: tan(z) = -i tanh(iz) (C99 G.6), so that it
+//! inherits the special values and the large-argument branch of tanh.  For
+//! finite arguments this is the same quotient as sin(z) / cos(z).
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tan(
     const complex<RealType>& x) {
-  return sin(x) / cos(x);
+  const Kokkos::complex<RealType> t =
+      tanh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+  return Kokkos::complex<RealType>(t.imag(), -t.real());
 }
 
 //! hyperbolic sine of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sinh(
     const complex<RealType>& x) {
-  return Kokkos::complex<RealType>(sinh(x.real()) * cos(x.imag()),
-                                   cosh(x.real()) * sin(x.imag()));
+  const RealType r = x.real();
+  const RealType i = x.imag();
+  // Special values, as specified by C99 Annex G (G.6.2.5), as in libc++.
+  if ((Kokkos::isinf(r) || r == RealType()) && !Kokkos::isfinite(i)) {
+    // (+-inf, NaN) or (+-0, NaN).  The sign of an infinite real part is
+    // unspecified; +inf as in glibc.
+    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    return Kokkos::complex<RealType>(Kokkos::isinf(r) ? Kokkos::fabs(r) : r,
+                                     nan);
+  }
+  if (i == RealType() && !Kokkos::isfinite(r)) return x;  // (inf or NaN, +-0)
+  return Kokkos::complex<RealType>(sinh(r) * cos(i), cosh(r) * sin(i));
 }
 
 //! hyperbolic cosine of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> cosh(
     const complex<RealType>& x) {
-  return Kokkos::complex<RealType>(cosh(x.real()) * cos(x.imag()),
-                                   sinh(x.real()) * sin(x.imag()));
+  const RealType r = x.real();
+  const RealType i = x.imag();
+  // Special values, as specified by C99 Annex G (G.6.2.4), as in libc++.
+  if (Kokkos::isinf(r) && !Kokkos::isfinite(i)) {
+    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    return Kokkos::complex<RealType>(Kokkos::fabs(r), nan);  // (inf, NaN)
+  }
+  if (r == RealType() && !Kokkos::isfinite(i)) {
+    // (NaN, +-0), the sign is unspecified; +0 as in glibc.
+    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    return Kokkos::complex<RealType>(nan, RealType());
+  }
+  if (i == RealType() && !Kokkos::isfinite(r)) {
+    // (inf or NaN, +-0).  cosh is even and conj(cosh(z)) = cosh(conj(z)), so
+    // the sign of the zero is the product of the signs of r and i.  (For
+    // r = +-0 the formula below already gives (1, +-0) with that sign.)
+    return Kokkos::complex<RealType>(Kokkos::fabs(r),
+                                     Kokkos::copysign(RealType(), r) * i);
+  }
+  return Kokkos::complex<RealType>(cosh(r) * cos(i), sinh(r) * sin(i));
 }
 
 //! hyperbolic tangent of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tanh(
     const complex<RealType>& x) {
-  return sinh(x) / cosh(x);
+  const RealType r = x.real();
+  const RealType i = x.imag();
+  // Special values, as specified by C99 Annex G (G.6.2.6), as in libc++.
+  if (Kokkos::isinf(r)) {
+    if (!Kokkos::isfinite(i)) {
+      // (+-1, +-0), the sign of the zero is unspecified; copysign as glibc.
+      return Kokkos::complex<RealType>(Kokkos::copysign(RealType(1), r),
+                                       Kokkos::copysign(RealType(), i));
+    }
+    return Kokkos::complex<RealType>(
+        Kokkos::copysign(RealType(1), r),
+        Kokkos::copysign(RealType(), sin(RealType(2) * i)));
+  }
+  if (r == RealType() && !Kokkos::isfinite(i)) {
+    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    return Kokkos::complex<RealType>(r, nan);  // (+-0, NaN), since C11
+  }
+  // A real argument (also NaN): (tanh(r), +-0) keeps the signs of zeros,
+  // which the quotient below loses, and is more accurate.
+  if (i == RealType()) return Kokkos::complex<RealType>(tanh(r), i);
+  if (Kokkos::isnan(r)) {  // (NaN, y) for y != 0: (NaN, NaN)
+    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    return Kokkos::complex<RealType>(nan, nan);
+  }
+  const RealType si = sin(i);
+  const RealType ci = cos(i);
+  // Beyond (max_exponent - 1) ln 2 / 2, sinh(r)^2 overflows.  There tanh(z) is
+  // (+-1, 4 sin(i) cos(i) exp(-2|r|)) to far below one ulp (the neglected
+  // relative term is about 2 exp(-2|r|)), as in glibc.
+  constexpr RealType r_max =
+      RealType(Kokkos::Experimental::max_exponent_v<RealType> - 1) *
+      Kokkos::numbers::ln2_v<RealType> / 2;
+  if (Kokkos::fabs(r) > r_max) {
+    return Kokkos::complex<RealType>(
+        Kokkos::copysign(RealType(1), r),
+        RealType(4) * si * ci * exp(-RealType(2) * Kokkos::fabs(r)));
+  }
+  // Kahan's formula, as in glibc:
+  //   tanh(z) = (sinh(r) cosh(r) + i sin(i) cos(i)) / (sinh(r)^2 + cos(i)^2).
+  // The denominator is a sum of squares, so both parts are accurate to a few
+  // ulps also where sinh(z) / cosh(z) cancels (the imaginary part for
+  // |r| >~ 5, or near the poles).
+  RealType sh = r;
+  RealType ch = RealType(1);
+  if (Kokkos::fabs(r) > Kokkos::Experimental::norm_min_v<RealType>) {
+    sh = sinh(r);
+    ch = cosh(r);
+  }
+  const RealType den =
+      Kokkos::fabs(sh) >
+              Kokkos::fabs(ci) * Kokkos::Experimental::epsilon_v<RealType>
+          ? sh * sh + ci * ci
+          : ci * ci;
+  return Kokkos::complex<RealType>(sh * ch / den, si * ci / den);
 }
 
 //! inverse hyperbolic sine of a complex number.

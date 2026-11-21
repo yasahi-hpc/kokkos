@@ -988,6 +988,148 @@ TEST(TEST_CATEGORY, complex_exp_sqrt_log_special_values) {
   TestComplexElementarySpecialValues<double, TEST_EXECSPACE>().testit();
 }
 
+// sinh, cosh, tanh on the same grid, compared with std::complex for class,
+// sign and value; sin, cos, tan for class and value, and bitwise against
+// the identities sin z = -i sinh(iz), cos z = cosh(iz), tan z = -i tanh(iz)
+// (C99 G.6), which leave the signs that Annex G does not specify to sinh,
+// cosh and tanh (glibc's csin/ccos choose them independently).  Also tanh for
+// large real parts, where sinh(z) / cosh(z) overflowed to NaN.
+template <class RealType, class ExecSpace>
+struct TestComplexHyperbolicSpecialValues {
+  using C                       = Kokkos::complex<RealType>;
+  static constexpr int NV       = 9;
+  static constexpr int N        = NV * NV;
+  static constexpr RealType inf = Kokkos::Experimental::infinity_v<RealType>;
+  static constexpr RealType nan = Kokkos::Experimental::quiet_NaN_v<RealType>;
+
+  Kokkos::View<C *, ExecSpace> d_in;
+  Kokkos::View<C *[9], ExecSpace> d_out;  // sinh cosh tanh sin cos tan, and
+                                          // the identities for sin cos tan
+  TestComplexHyperbolicSpecialValues() : d_in("in", N), d_out("out", N) {}
+
+  KOKKOS_FUNCTION void operator()(int k) const {
+    const C z   = d_in(k);
+    const C iz  = C(-z.imag(), z.real());  // i z
+    d_out(k, 0) = Kokkos::sinh(z);
+    d_out(k, 1) = Kokkos::cosh(z);
+    d_out(k, 2) = Kokkos::tanh(z);
+    d_out(k, 3) = Kokkos::sin(z);
+    d_out(k, 4) = Kokkos::cos(z);
+    d_out(k, 5) = Kokkos::tan(z);
+    const C s   = Kokkos::sinh(iz);
+    const C t   = Kokkos::tanh(iz);
+    d_out(k, 6) = C(s.imag(), -s.real());  // -i sinh(iz)
+    d_out(k, 7) = Kokkos::cosh(iz);
+    d_out(k, 8) = C(t.imag(), -t.real());  // -i tanh(iz)
+  }
+
+  void testit() {
+    const RealType v[NV] = {
+        0, -RealType(0), 1, -1, RealType(0.5), RealType(2.5), inf, -inf, nan};
+    auto h_in = Kokkos::create_mirror_view(d_in);
+    for (int a = 0; a < NV; ++a)
+      for (int b = 0; b < NV; ++b) h_in(a * NV + b) = C(v[a], v[b]);
+    Kokkos::deep_copy(d_in, h_in);
+    Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, N), *this);
+    auto h_out =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
+
+    auto kind = [](RealType x) {
+      return std::isnan(x) ? 0 : std::isinf(x) ? 1 : x == 0 ? 2 : 3;
+    };
+    const RealType tol = 8 * Kokkos::Experimental::epsilon_v<RealType>;
+    auto check         = [&](RealType x, RealType e, bool with_sign) {
+      if (kind(x) != kind(e)) return false;
+      if (with_sign && kind(x) != 0 && std::signbit(x) != std::signbit(e))
+        return false;
+      return kind(x) != 3 || std::abs(x - e) <= tol * std::abs(e);
+    };
+    auto bitwise = [](C x, C y) {
+      auto same = [](RealType a, RealType b) {
+        return (std::isnan(a) && std::isnan(b)) ||
+               (a == b && std::signbit(a) == std::signbit(b));
+      };
+      return same(x.real(), y.real()) && same(x.imag(), y.imag());
+    };
+    const char *names[6] = {"sinh", "cosh", "tanh", "sin", "cos", "tan"};
+    for (int k = 0; k < N; ++k) {
+      const std::complex<RealType> z(h_in(k).real(), h_in(k).imag());
+      const std::complex<RealType> e[6] = {std::sinh(z), std::cosh(z),
+                                           std::tanh(z), std::sin(z),
+                                           std::cos(z),  std::tan(z)};
+      for (int f = 0; f < 6; ++f) {
+        const bool with_sign = f < 3;
+        EXPECT_TRUE(check(h_out(k, f).real(), e[f].real(), with_sign) &&
+                    check(h_out(k, f).imag(), e[f].imag(), with_sign))
+            << names[f] << h_in(k) << " = " << h_out(k, f) << ", std gives "
+            << e[f];
+      }
+      for (int f = 3; f < 6; ++f) {
+        EXPECT_TRUE(bitwise(h_out(k, f), h_out(k, f + 3)))
+            << names[f] << h_in(k) << " = " << h_out(k, f)
+            << " differs from its identity " << h_out(k, f + 3);
+      }
+    }
+  }
+};
+
+TEST(TEST_CATEGORY, complex_hyperbolic_special_values) {
+  TestComplexHyperbolicSpecialValues<float, TEST_EXECSPACE>().testit();
+  TestComplexHyperbolicSpecialValues<double, TEST_EXECSPACE>().testit();
+}
+
+// tanh for real parts beyond (max_exponent - 1) ln 2 / 2, where sinh^2
+// overflows: previously NaN (sinh(z) / cosh(z) = inf / inf), now
+// (+-1, 4 sin(y) cos(y) exp(-2|x|)), and tan symmetrically.  Below that,
+// Kahan's formula is accurate componentwise: the imaginary part of
+// tanh(20 + i) (~7.7e-18) was 7 times too large with sinh(z) / cosh(z), and
+// near a pole the parts must stay accurate too.
+template <class RealType, class ExecSpace>
+struct TestComplexTanhLarge {
+  using C = Kokkos::complex<RealType>;
+  Kokkos::View<C[6], ExecSpace> d_out;
+  TestComplexTanhLarge() : d_out("out") {}
+  // 800 (double) and 100 (float) are beyond the threshold; 20 / 8 are below.
+  static constexpr RealType big   = sizeof(RealType) == 4 ? 100 : 800;
+  static constexpr RealType small = sizeof(RealType) == 4 ? 8 : 20;
+  // Close to the pole i pi/2 of tanh.
+  static constexpr RealType pole_x = RealType(1e-3);
+  static constexpr RealType pole_y = RealType(1.5707963267948966 - 1e-3);
+
+  KOKKOS_FUNCTION void operator()(int) const {
+    d_out(0) = Kokkos::tanh(C(big, 1));
+    d_out(1) = Kokkos::tanh(C(-big, -1));
+    d_out(2) = Kokkos::tan(C(1, big));
+    d_out(3) = Kokkos::tanh(C(small, 1));
+    d_out(4) = Kokkos::tanh(C(big, 0));
+    d_out(5) = Kokkos::tanh(C(pole_x, pole_y));
+  }
+  void testit() {
+    Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, 1), *this);
+    auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
+    // The imaginary parts underflow to (+-)0 for these real parts.
+    EXPECT_EQ(h(0), C(1, 0));
+    EXPECT_EQ(h(1), C(-1, 0));
+    EXPECT_TRUE(h(1).imag() == 0 && std::signbit(h(1).imag()));
+    EXPECT_EQ(h(2), C(0, 1));
+    const std::complex<RealType> e =
+        std::tanh(std::complex<RealType>(small, 1));
+    const RealType tol = 8 * Kokkos::Experimental::epsilon_v<RealType>;
+    EXPECT_NEAR(h(3).real(), e.real(), tol);
+    EXPECT_NEAR(h(3).imag(), e.imag(), tol * std::abs(e.imag()));
+    EXPECT_EQ(h(4), C(1, 0));
+    const std::complex<RealType> p =
+        std::tanh(std::complex<RealType>(pole_x, pole_y));
+    EXPECT_NEAR(h(5).real(), p.real(), tol * std::abs(p.real()));
+    EXPECT_NEAR(h(5).imag(), p.imag(), tol * std::abs(p.imag()));
+  }
+};
+
+TEST(TEST_CATEGORY, complex_tanh_large_argument) {
+  TestComplexTanhLarge<float, TEST_EXECSPACE>().testit();
+  TestComplexTanhLarge<double, TEST_EXECSPACE>().testit();
+}
+
 template <class ExecSpace>
 struct TestComplexStructuredBindings {
   using exec_space       = ExecSpace;
