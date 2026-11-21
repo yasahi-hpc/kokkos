@@ -2175,6 +2175,173 @@ TEST(TEST_CATEGORY, complex_half_conversions) {
 #endif
 }
 
+// complex<half_t> and complex<bhalf_t> arithmetic and functions are computed
+// in float and rounded once (D5): the result is exactly that of complex<float>
+// on the same values, rounded to the half type.
+template <class H>
+KOKKOS_FUNCTION Kokkos::complex<H> half_compute_op(int k, Kokkos::complex<H> x,
+                                                   Kokkos::complex<H> y) {
+  switch (k) {
+    case 0: return x * y;
+    case 1: return x / y;
+    case 2: {
+      Kokkos::complex<H> z = x;
+      z *= y;
+      return z;
+    }
+    case 3: {
+      Kokkos::complex<H> z = x;
+      z /= y;
+      return z;
+    }
+    case 4: return Kokkos::exp(x);
+    case 5: return Kokkos::log(x);
+    case 6: return Kokkos::log10(x);
+    case 7: return Kokkos::sqrt(x);
+    case 8: return Kokkos::sin(x);
+    case 9: return Kokkos::cos(x);
+    case 10: return Kokkos::tan(x);
+    case 11: return Kokkos::sinh(x);
+    case 12: return Kokkos::cosh(x);
+    case 13: return Kokkos::tanh(x);
+    case 14: return Kokkos::asin(x);
+    case 15: return Kokkos::acos(x);
+    case 16: return Kokkos::atan(x);
+    case 17: return Kokkos::asinh(x);
+    case 18: return Kokkos::acosh(x);
+    case 19: return Kokkos::atanh(x);
+    case 20: return Kokkos::pow(x, y);
+    default: return Kokkos::pow(x, y.real());
+  }
+}
+
+template <class H>
+KOKKOS_FUNCTION Kokkos::complex<H> half_compute_op_via_float(
+    int k, Kokkos::complex<H> x, Kokkos::complex<H> y) {
+  using CF = Kokkos::complex<float>;
+  const CF xf(x);
+  const CF yf(y);
+  CF r;
+  switch (k) {
+    case 0:
+    case 2: r = xf * yf; break;
+    case 1:
+    case 3: r = xf / yf; break;
+    case 4: r = Kokkos::exp(xf); break;
+    case 5: r = Kokkos::log(xf); break;
+    case 6: r = Kokkos::log10(xf); break;
+    case 7: r = Kokkos::sqrt(xf); break;
+    case 8: r = Kokkos::sin(xf); break;
+    case 9: r = Kokkos::cos(xf); break;
+    case 10: r = Kokkos::tan(xf); break;
+    case 11: r = Kokkos::sinh(xf); break;
+    case 12: r = Kokkos::cosh(xf); break;
+    case 13: r = Kokkos::tanh(xf); break;
+    case 14: r = Kokkos::asin(xf); break;
+    case 15: r = Kokkos::acos(xf); break;
+    case 16: r = Kokkos::atan(xf); break;
+    case 17: r = Kokkos::asinh(xf); break;
+    case 18: r = Kokkos::acosh(xf); break;
+    case 19: r = Kokkos::atanh(xf); break;
+    case 20: r = Kokkos::pow(xf, yf); break;
+    default: r = Kokkos::pow(xf, yf.real()); break;
+  }
+  return Kokkos::complex<H>(r);
+}
+
+// Same bits, or both NaN.
+template <class H>
+KOKKOS_FUNCTION bool half_same(H a, H b) {
+  return (a != a && b != b) || Kokkos::bit_cast<std::uint16_t>(a) ==
+                                   Kokkos::bit_cast<std::uint16_t>(b);
+}
+
+template <class H>
+void test_complex_half_compute_in_float() {
+  using CH           = Kokkos::complex<H>;
+  using CD           = Kokkos::complex<double>;
+  constexpr int nops = 22;
+  // Ordinary values, values whose products or squares overflow H, and values
+  // near the branch cuts.
+  const CH vals[]  = {CH(H(1.5f), H(-0.5f)),      CH(H(0.25f), H(2.f)),
+                      CH(H(269.f), H(111.5f)),    CH(H(-3.f), H(0.125f)),
+                      CH(H(16384.f), H(-8192.f)), CH(H(0.75f), H(-0.f)),
+                      CH(H(-2.f), H(0.f)),        CH(H(1e-3f), H(-4.f))};
+  constexpr int nv = sizeof(vals) / sizeof(vals[0]);
+  Kokkos::View<CH *[2], TEST_EXECSPACE> in("in", nv * nv);
+  Kokkos::View<int[1], TEST_EXECSPACE> errors("errors");
+  auto h_in = Kokkos::create_mirror_view(in);
+  for (int i = 0; i < nv; ++i) {
+    for (int j = 0; j < nv; ++j) {
+      h_in(i * nv + j, 0) = vals[i];
+      h_in(i * nv + j, 1) = vals[j];
+    }
+  }
+  Kokkos::deep_copy(in, h_in);
+  int host_errors = 0;
+  for (int i = 0; i < nv * nv; ++i) {
+    for (int k = 0; k < nops; ++k) {
+      const CH r = half_compute_op<H>(k, h_in(i, 0), h_in(i, 1));
+      const CH e = half_compute_op_via_float<H>(k, h_in(i, 0), h_in(i, 1));
+      if (!half_same(r.real(), e.real()) || !half_same(r.imag(), e.imag())) {
+        ++host_errors;
+        ADD_FAILURE() << "op " << k << " on " << h_in(i, 0) << ", "
+                      << h_in(i, 1) << ": " << r << " vs " << e;
+      }
+    }
+  }
+  EXPECT_EQ(host_errors, 0);
+  Kokkos::parallel_for(
+      Kokkos::RangePolicy<TEST_EXECSPACE>(0, nv * nv), KOKKOS_LAMBDA(int i) {
+        for (int k = 0; k < nops; ++k) {
+          const CH r = half_compute_op<H>(k, in(i, 0), in(i, 1));
+          const CH e = half_compute_op_via_float<H>(k, in(i, 0), in(i, 1));
+          if (!half_same(r.real(), e.real()) || !half_same(r.imag(), e.imag()))
+            Kokkos::atomic_inc(&errors(0));
+        }
+      });
+  auto h_errors =
+      Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), errors);
+  EXPECT_EQ(h_errors(0), 0);
+
+  // Intermediate overflow: 269^2 = 72361 overflows half_t, but the product
+  // (59928.75, 59987) does not; it is the exact result rounded once.
+  const CH z(H(269.f), H(111.5f));
+  EXPECT_EQ(z * z, CH(CD(z) * CD(z)));
+  // a c + b d = 120000 overflows half_t, the quotient does not.
+  EXPECT_EQ(CH(H(60000.f), H(60000.f)) / CH(H(1.f), H(1.f)),
+            CH(H(60000.f), H(0.f)));
+  // Special values (C99 Annex G) are kept.
+  const H inf = H(Kokkos::Experimental::infinity_v<float>);
+  EXPECT_EQ(CH(H(1.f), H(1.f)) / CH(H(0.f), H(0.f)), CH(inf, inf));
+  EXPECT_EQ(CH(H(1.f), H(1.f)) / CH(inf, H(0.f)), CH(H(0.f), H(0.f)));
+  // (inf, NaN) * (1, 0) is (inf, NaN), not (NaN, NaN).
+  const CH m =
+      CH(inf, H(Kokkos::Experimental::quiet_NaN_v<float>)) * CH(H(1.f), H(0.f));
+  EXPECT_EQ(m.real(), inf);
+  EXPECT_TRUE(Kokkos::isnan(static_cast<float>(m.imag())));
+  // asin of a large argument: no spurious overflow in the squares.
+  const CH a = Kokkos::asin(CH(H(16384.f), H(16384.f)));
+  EXPECT_TRUE(Kokkos::isfinite(static_cast<float>(a.real())) &&
+              Kokkos::isfinite(static_cast<float>(a.imag())))
+      << a;
+}
+
+TEST(TEST_CATEGORY, complex_half_compute_in_float) {
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  test_complex_half_compute_in_float<Kokkos::Experimental::half_t>();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  test_complex_half_compute_in_float<Kokkos::Experimental::bhalf_t>();
+  // bhalf_t has float's range: the squares in float do not overflow either.
+  using CB = Kokkos::complex<Kokkos::Experimental::bhalf_t>;
+  using Kokkos::Experimental::bhalf_t;
+  EXPECT_EQ(
+      CB(bhalf_t(1e38f), bhalf_t(1e38f)) / CB(bhalf_t(1e38f), bhalf_t(1e38f)),
+      CB(bhalf_t(1.f), bhalf_t(0.f)));
+#endif
+}
+
 }  // namespace Test
 
 #ifdef KOKKOS_COMPILER_NVCC

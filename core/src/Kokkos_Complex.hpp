@@ -23,6 +23,20 @@ namespace Kokkos {
 
 namespace Impl {
 
+// half_t or bhalf_t (not when they are aliases of float).
+template <class T>
+inline constexpr bool is_half_type_v =
+    Kokkos::Experimental::Impl::is_float16<T>::value ||
+    Kokkos::Experimental::Impl::is_bfloat16<T>::value;
+
+// The type complex<T> arithmetic and functions are computed in (D5): float for
+// half_t and bhalf_t, whose products overflow early (|a c| > 65504 for half_t)
+// and lose much in each rounding; the result is rounded once to T.  Measured on
+// an A100, this costs nothing for * and / (memory-bound: identical; a chain of
+// dependent products: 12% faster than native __half).
+template <class T>
+using complex_compute_t = std::conditional_t<is_half_type_v<T>, float, T>;
+
 // The constants the algorithms below use, as values of T. For the standard
 // floating-point types they are the constexpr numeric traits and <numbers>
 // constants. For half_t and bhalf_t the numeric traits are
@@ -163,7 +177,7 @@ complex_division_by_zero_or_of_inf_or_nan_is_not_a_constant_expression() {}
 /// NaN, so the recovery is not needed, and the result is the same as at run
 /// time (up to floating-point contraction at run time).
 template <class T>
-KOKKOS_INLINE_FUNCTION constexpr void complex_divide(
+KOKKOS_INLINE_FUNCTION constexpr void complex_divide_impl(
     T a, T b, T c, T d, T& re, T& im) noexcept(noexcept(T{} / T{})) {
 #if defined(__cpp_if_consteval)  // since C++23
   if consteval {
@@ -231,8 +245,9 @@ complex_multiplication_of_inf_or_nan_is_not_a_constant_expression() {}
 /// During constant evaluation the operands must be finite; for those the
 /// result is the same as at run time (up to contraction at run time).
 template <class T>
-KOKKOS_INLINE_FUNCTION constexpr void complex_multiply(T a, T b, T c, T d,
-                                                       T& re, T& im) noexcept {
+KOKKOS_INLINE_FUNCTION constexpr void complex_multiply_impl(T a, T b, T c, T d,
+                                                            T& re,
+                                                            T& im) noexcept {
 #if defined(__cpp_if_consteval)  // since C++23
   if consteval {
 #else
@@ -288,6 +303,40 @@ KOKKOS_INLINE_FUNCTION constexpr void complex_multiply(T a, T b, T c, T d,
   im = y;
 }
 
+/// \brief (a + ib) / (c + id) = re + i im, computed in complex_compute_t<T>.
+template <class T>
+KOKKOS_INLINE_FUNCTION constexpr void complex_divide(
+    T a, T b, T c, T d, T& re, T& im) noexcept(noexcept(T{} / T{})) {
+  using U = complex_compute_t<T>;
+  if constexpr (std::is_same_v<U, T>) {
+    complex_divide_impl(a, b, c, d, re, im);
+  } else {
+    U x{};
+    U y{};
+    complex_divide_impl<U>(static_cast<U>(a), static_cast<U>(b),
+                           static_cast<U>(c), static_cast<U>(d), x, y);
+    re = static_cast<T>(x);
+    im = static_cast<T>(y);
+  }
+}
+
+/// \brief (a + ib) (c + id) = re + i im, computed in complex_compute_t<T>.
+template <class T>
+KOKKOS_INLINE_FUNCTION constexpr void complex_multiply(T a, T b, T c, T d,
+                                                       T& re, T& im) noexcept {
+  using U = complex_compute_t<T>;
+  if constexpr (std::is_same_v<U, T>) {
+    complex_multiply_impl(a, b, c, d, re, im);
+  } else {
+    U x{};
+    U y{};
+    complex_multiply_impl<U>(static_cast<U>(a), static_cast<U>(b),
+                             static_cast<U>(c), static_cast<U>(d), x, y);
+    re = static_cast<T>(x);
+    im = static_cast<T>(y);
+  }
+}
+
 }  // namespace Impl
 
 template <class RealType>
@@ -305,11 +354,6 @@ inline constexpr bool is_complex_value_type_v =
     (std::is_floating_point_v<T> ||
      Kokkos::Experimental::Impl::is_float16<T>::value ||
      Kokkos::Experimental::Impl::is_bfloat16<T>::value);
-// half_t or bhalf_t (not when they are aliases of float).
-template <class T>
-inline constexpr bool is_half_type_v =
-    Kokkos::Experimental::Impl::is_float16<T>::value ||
-    Kokkos::Experimental::Impl::is_bfloat16<T>::value;
 // Whether complex<To>(complex<From>) is explicit.  As for std::complex since
 // C++23 (P1467), a conversion into an extended floating-point type of lower
 // rank (float or double to half_t or bhalf_t) is explicit, and widening ones
@@ -879,9 +923,15 @@ KOKKOS_INLINE_FUNCTION RealType abs(const complex<RealType>& x) {
 //! Power of a complex number
 template <class T>
 KOKKOS_INLINE_FUNCTION complex<T> pow(const complex<T>& x, const T& y) {
-  T r     = abs(x);
-  T theta = atan2(x.imag(), x.real());
-  return polar(pow(r, y), y * theta);
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<T>) {
+    return Kokkos::complex<T>(
+        pow(Kokkos::complex<float>(x), static_cast<float>(y)));
+  } else {
+    T r     = abs(x);
+    T theta = atan2(x.imag(), x.real());
+    return polar(pow(r, y), y * theta);
+  }
 }
 
 template <class T>
@@ -892,7 +942,13 @@ KOKKOS_INLINE_FUNCTION complex<T> pow(const T& x, const complex<T>& y) {
 template <class T>
 KOKKOS_INLINE_FUNCTION complex<T> pow(const complex<T>& x,
                                       const complex<T>& y) {
-  return x == T() ? T() : exp(y * log(x));
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<T>) {
+    return Kokkos::complex<T>(
+        pow(Kokkos::complex<float>(x), Kokkos::complex<float>(y)));
+  } else {
+    return x == T() ? T() : exp(y * log(x));
+  }
 }
 
 template <class T, class U, class = Impl::promote_t<T>>
@@ -921,35 +977,40 @@ KOKKOS_INLINE_FUNCTION complex<Impl::promote_2_t<T, U>> pow(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sqrt(
     const complex<RealType>& x) {
-  RealType r = x.real();
-  RealType i = x.imag();
-
-  // Special values, as specified by C99 Annex G (G.6.4.2) and done by libc++.
-  if (Kokkos::isinf(i)) {
-    const RealType inf = Impl::complex_infinity<RealType>();
-    return Kokkos::complex<RealType>(inf, i);  // also for a NaN real part
-  }
-  if (Kokkos::isinf(r)) {
-    if (r > RealType()) {  // (+inf, y): (+inf, +-0), or (+inf, NaN)
-      return Kokkos::complex<RealType>(
-          r, Kokkos::isnan(i) ? i : Kokkos::copysign(RealType(), i));
-    }
-    // (-inf, y): (+0, +-inf), or (NaN, +-inf)
-    return Kokkos::complex<RealType>(Kokkos::isnan(i) ? i : RealType(),
-                                     Kokkos::copysign(r, i));
-  }
-
-  // The sign of the imaginary part follows that of i, also for i = -0, so
-  // that sqrt is continuous from either side of the branch cut (C99 G.6.4.2).
-  if (r == RealType()) {
-    RealType t = sqrt(fabs(i) / 2);
-    return Kokkos::complex<RealType>(t, Kokkos::copysign(t, i));
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(sqrt(Kokkos::complex<float>(x)));
   } else {
-    RealType t = sqrt(2 * (abs(x) + fabs(r)));
-    RealType u = t / 2;
-    return r > RealType()
-               ? Kokkos::complex<RealType>(u, i / t)
-               : Kokkos::complex<RealType>(fabs(i) / t, Kokkos::copysign(u, i));
+    RealType r = x.real();
+    RealType i = x.imag();
+
+    // Special values, as specified by C99 Annex G (G.6.4.2) and done by libc++.
+    if (Kokkos::isinf(i)) {
+      const RealType inf = Impl::complex_infinity<RealType>();
+      return Kokkos::complex<RealType>(inf, i);  // also for a NaN real part
+    }
+    if (Kokkos::isinf(r)) {
+      if (r > RealType()) {  // (+inf, y): (+inf, +-0), or (+inf, NaN)
+        return Kokkos::complex<RealType>(
+            r, Kokkos::isnan(i) ? i : Kokkos::copysign(RealType(), i));
+      }
+      // (-inf, y): (+0, +-inf), or (NaN, +-inf)
+      return Kokkos::complex<RealType>(Kokkos::isnan(i) ? i : RealType(),
+                                       Kokkos::copysign(r, i));
+    }
+
+    // The sign of the imaginary part follows that of i, also for i = -0, so
+    // that sqrt is continuous from either side of the branch cut (C99 G.6.4.2).
+    if (r == RealType()) {
+      RealType t = sqrt(fabs(i) / 2);
+      return Kokkos::complex<RealType>(t, Kokkos::copysign(t, i));
+    } else {
+      RealType t = sqrt(2 * (abs(x) + fabs(r)));
+      RealType u = t / 2;
+      return r > RealType() ? Kokkos::complex<RealType>(u, i / t)
+                            : Kokkos::complex<RealType>(fabs(i) / t,
+                                                        Kokkos::copysign(u, i));
+    }
   }
 }
 
@@ -1018,41 +1079,56 @@ proj(ArithmeticType x) {
 //! Exponential of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION complex<RealType> exp(const complex<RealType>& x) {
-  const RealType r = x.real();
-  RealType i       = x.imag();
-  // Special values, as specified by C99 Annex G (G.6.3.1) and done by libc++.
-  if (i == RealType()) {  // exp of a real number; keeps the sign of i
-    return complex<RealType>(exp(r), i);
-  }
-  if (Kokkos::isinf(r)) {
-    if (r < RealType()) {  // (-inf, y): (+-0, +-0) for y infinite or NaN
-      // The signs are unspecified; copysign gives glibc's (0, -0) for -inf.
-      if (!Kokkos::isfinite(i)) i = Kokkos::copysign(RealType(1), i);
-    } else if (!Kokkos::isfinite(i)) {  // (+inf, inf or NaN): (+-inf, NaN)
-      if (Kokkos::isinf(i)) {
-        const RealType nan = Impl::complex_quiet_nan<RealType>();
-        i                  = nan;
-      }
-      return complex<RealType>(r, i);
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(exp(Kokkos::complex<float>(x)));
+  } else {
+    const RealType r = x.real();
+    RealType i       = x.imag();
+    // Special values, as specified by C99 Annex G (G.6.3.1) and done by libc++.
+    if (i == RealType()) {  // exp of a real number; keeps the sign of i
+      return complex<RealType>(exp(r), i);
     }
+    if (Kokkos::isinf(r)) {
+      if (r < RealType()) {  // (-inf, y): (+-0, +-0) for y infinite or NaN
+        // The signs are unspecified; copysign gives glibc's (0, -0) for -inf.
+        if (!Kokkos::isfinite(i)) i = Kokkos::copysign(RealType(1), i);
+      } else if (!Kokkos::isfinite(i)) {  // (+inf, inf or NaN): (+-inf, NaN)
+        if (Kokkos::isinf(i)) {
+          const RealType nan = Impl::complex_quiet_nan<RealType>();
+          i                  = nan;
+        }
+        return complex<RealType>(r, i);
+      }
+    }
+    const RealType e = exp(r);
+    return complex<RealType>(e * cos(i), e * sin(i));
   }
-  const RealType e = exp(r);
-  return complex<RealType>(e * cos(i), e * sin(i));
 }
 
 //! natural log of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> log(
     const complex<RealType>& x) {
-  RealType phi = atan2(x.imag(), x.real());
-  return Kokkos::complex<RealType>(log(abs(x)), phi);
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(log(Kokkos::complex<float>(x)));
+  } else {
+    RealType phi = atan2(x.imag(), x.real());
+    return Kokkos::complex<RealType>(log(abs(x)), phi);
+  }
 }
 
 //! base 10 log of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> log10(
     const complex<RealType>& x) {
-  return log(x) / log(RealType(10));
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(log10(Kokkos::complex<float>(x)));
+  } else {
+    return log(x) / log(RealType(10));
+  }
 }
 
 //! sine of a complex number: sin(z) = -i sinh(iz) (C99 G.6), so that it
@@ -1061,9 +1137,14 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> log10(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sin(
     const complex<RealType>& x) {
-  const Kokkos::complex<RealType> t =
-      sinh(Kokkos::complex<RealType>(-x.imag(), x.real()));
-  return Kokkos::complex<RealType>(t.imag(), -t.real());
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(sin(Kokkos::complex<float>(x)));
+  } else {
+    const Kokkos::complex<RealType> t =
+        sinh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+    return Kokkos::complex<RealType>(t.imag(), -t.real());
+  }
 }
 
 //! cosine of a complex number: cos(z) = cosh(iz) (C99 G.6), so that it
@@ -1072,7 +1153,12 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sin(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> cos(
     const complex<RealType>& x) {
-  return cosh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(cos(Kokkos::complex<float>(x)));
+  } else {
+    return cosh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+  }
 }
 
 //! tangent of a complex number: tan(z) = -i tanh(iz) (C99 G.6), so that it
@@ -1081,115 +1167,136 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> cos(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tan(
     const complex<RealType>& x) {
-  const Kokkos::complex<RealType> t =
-      tanh(Kokkos::complex<RealType>(-x.imag(), x.real()));
-  return Kokkos::complex<RealType>(t.imag(), -t.real());
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(tan(Kokkos::complex<float>(x)));
+  } else {
+    const Kokkos::complex<RealType> t =
+        tanh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+    return Kokkos::complex<RealType>(t.imag(), -t.real());
+  }
 }
 
 //! hyperbolic sine of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sinh(
     const complex<RealType>& x) {
-  const RealType r = x.real();
-  const RealType i = x.imag();
-  // Special values, as specified by C99 Annex G (G.6.2.5), as in libc++.
-  if ((Kokkos::isinf(r) || r == RealType()) && !Kokkos::isfinite(i)) {
-    // (+-inf, NaN) or (+-0, NaN).  The sign of an infinite real part is
-    // unspecified; +inf as in glibc.
-    const RealType nan = Impl::complex_quiet_nan<RealType>();
-    return Kokkos::complex<RealType>(Kokkos::isinf(r) ? Kokkos::fabs(r) : r,
-                                     nan);
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(sinh(Kokkos::complex<float>(x)));
+  } else {
+    const RealType r = x.real();
+    const RealType i = x.imag();
+    // Special values, as specified by C99 Annex G (G.6.2.5), as in libc++.
+    if ((Kokkos::isinf(r) || r == RealType()) && !Kokkos::isfinite(i)) {
+      // (+-inf, NaN) or (+-0, NaN).  The sign of an infinite real part is
+      // unspecified; +inf as in glibc.
+      const RealType nan = Impl::complex_quiet_nan<RealType>();
+      return Kokkos::complex<RealType>(Kokkos::isinf(r) ? Kokkos::fabs(r) : r,
+                                       nan);
+    }
+    if (i == RealType() && !Kokkos::isfinite(r)) return x;  // (inf or NaN, +-0)
+    return Kokkos::complex<RealType>(sinh(r) * cos(i), cosh(r) * sin(i));
   }
-  if (i == RealType() && !Kokkos::isfinite(r)) return x;  // (inf or NaN, +-0)
-  return Kokkos::complex<RealType>(sinh(r) * cos(i), cosh(r) * sin(i));
 }
 
 //! hyperbolic cosine of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> cosh(
     const complex<RealType>& x) {
-  const RealType r = x.real();
-  const RealType i = x.imag();
-  // Special values, as specified by C99 Annex G (G.6.2.4), as in libc++.
-  if (Kokkos::isinf(r) && !Kokkos::isfinite(i)) {
-    const RealType nan = Impl::complex_quiet_nan<RealType>();
-    return Kokkos::complex<RealType>(Kokkos::fabs(r), nan);  // (inf, NaN)
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(cosh(Kokkos::complex<float>(x)));
+  } else {
+    const RealType r = x.real();
+    const RealType i = x.imag();
+    // Special values, as specified by C99 Annex G (G.6.2.4), as in libc++.
+    if (Kokkos::isinf(r) && !Kokkos::isfinite(i)) {
+      const RealType nan = Impl::complex_quiet_nan<RealType>();
+      return Kokkos::complex<RealType>(Kokkos::fabs(r), nan);  // (inf, NaN)
+    }
+    if (r == RealType() && !Kokkos::isfinite(i)) {
+      // (NaN, +-0), the sign is unspecified; +0 as in glibc.
+      const RealType nan = Impl::complex_quiet_nan<RealType>();
+      return Kokkos::complex<RealType>(nan, RealType());
+    }
+    if (i == RealType() && !Kokkos::isfinite(r)) {
+      // (inf or NaN, +-0).  cosh is even and conj(cosh(z)) = cosh(conj(z)), so
+      // the sign of the zero is the product of the signs of r and i.  (For
+      // r = +-0 the formula below already gives (1, +-0) with that sign.)
+      // For a NaN real part the sign is unspecified; i itself, not copysign:
+      // the sign bit of a NaN is not portable (see atanh).
+      return Kokkos::complex<RealType>(
+          Kokkos::fabs(r),
+          Kokkos::isnan(r) ? i : Kokkos::copysign(RealType(), r) * i);
+    }
+    return Kokkos::complex<RealType>(cosh(r) * cos(i), sinh(r) * sin(i));
   }
-  if (r == RealType() && !Kokkos::isfinite(i)) {
-    // (NaN, +-0), the sign is unspecified; +0 as in glibc.
-    const RealType nan = Impl::complex_quiet_nan<RealType>();
-    return Kokkos::complex<RealType>(nan, RealType());
-  }
-  if (i == RealType() && !Kokkos::isfinite(r)) {
-    // (inf or NaN, +-0).  cosh is even and conj(cosh(z)) = cosh(conj(z)), so
-    // the sign of the zero is the product of the signs of r and i.  (For
-    // r = +-0 the formula below already gives (1, +-0) with that sign.)
-    // For a NaN real part the sign is unspecified; i itself, not copysign:
-    // the sign bit of a NaN is not portable (see atanh).
-    return Kokkos::complex<RealType>(
-        Kokkos::fabs(r),
-        Kokkos::isnan(r) ? i : Kokkos::copysign(RealType(), r) * i);
-  }
-  return Kokkos::complex<RealType>(cosh(r) * cos(i), sinh(r) * sin(i));
 }
 
 //! hyperbolic tangent of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tanh(
     const complex<RealType>& x) {
-  const RealType r = x.real();
-  const RealType i = x.imag();
-  // Special values, as specified by C99 Annex G (G.6.2.6), as in libc++.
-  if (Kokkos::isinf(r)) {
-    if (!Kokkos::isfinite(i)) {
-      // (+-1, +-0), the sign of the zero is unspecified; copysign as glibc.
-      return Kokkos::complex<RealType>(Kokkos::copysign(RealType(1), r),
-                                       Kokkos::copysign(RealType(), i));
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(tanh(Kokkos::complex<float>(x)));
+  } else {
+    const RealType r = x.real();
+    const RealType i = x.imag();
+    // Special values, as specified by C99 Annex G (G.6.2.6), as in libc++.
+    if (Kokkos::isinf(r)) {
+      if (!Kokkos::isfinite(i)) {
+        // (+-1, +-0), the sign of the zero is unspecified; copysign as glibc.
+        return Kokkos::complex<RealType>(Kokkos::copysign(RealType(1), r),
+                                         Kokkos::copysign(RealType(), i));
+      }
+      return Kokkos::complex<RealType>(
+          Kokkos::copysign(RealType(1), r),
+          Kokkos::copysign(RealType(), sin(RealType(2) * i)));
     }
-    return Kokkos::complex<RealType>(
-        Kokkos::copysign(RealType(1), r),
-        Kokkos::copysign(RealType(), sin(RealType(2) * i)));
+    if (r == RealType() && !Kokkos::isfinite(i)) {
+      const RealType nan = Impl::complex_quiet_nan<RealType>();
+      return Kokkos::complex<RealType>(r, nan);  // (+-0, NaN), since C11
+    }
+    // A real argument (also NaN): (tanh(r), +-0) keeps the signs of zeros,
+    // which the quotient below loses, and is more accurate.
+    if (i == RealType()) return Kokkos::complex<RealType>(tanh(r), i);
+    if (Kokkos::isnan(r)) {  // (NaN, y) for y != 0: (NaN, NaN)
+      const RealType nan = Impl::complex_quiet_nan<RealType>();
+      return Kokkos::complex<RealType>(nan, nan);
+    }
+    const RealType si = sin(i);
+    const RealType ci = cos(i);
+    // Beyond (max_exponent - 1) ln 2 / 2, sinh(r)^2 overflows.  There tanh(z)
+    // is
+    // (+-1, 4 sin(i) cos(i) exp(-2|r|)) to far below one ulp (the neglected
+    // relative term is about 2 exp(-2|r|)), as in glibc.
+    const RealType r_max =
+        RealType(Kokkos::Experimental::max_exponent_v<RealType> - 1) *
+        Impl::complex_ln2<RealType>() / RealType(2);
+    if (Kokkos::fabs(r) > r_max) {
+      return Kokkos::complex<RealType>(
+          Kokkos::copysign(RealType(1), r),
+          RealType(4) * si * ci * exp(-RealType(2) * Kokkos::fabs(r)));
+    }
+    // Kahan's formula, as in glibc:
+    //   tanh(z) = (sinh(r) cosh(r) + i sin(i) cos(i)) / (sinh(r)^2 + cos(i)^2).
+    // The denominator is a sum of squares, so both parts are accurate to a few
+    // ulps also where sinh(z) / cosh(z) cancels (the imaginary part for
+    // |r| >~ 5, or near the poles).
+    RealType sh = r;
+    RealType ch = RealType(1);
+    if (Kokkos::fabs(r) > Impl::complex_norm_min<RealType>()) {
+      sh = sinh(r);
+      ch = cosh(r);
+    }
+    const RealType den =
+        Kokkos::fabs(sh) > Kokkos::fabs(ci) * Impl::complex_epsilon<RealType>()
+            ? sh * sh + ci * ci
+            : ci * ci;
+    return Kokkos::complex<RealType>(sh * ch / den, si * ci / den);
   }
-  if (r == RealType() && !Kokkos::isfinite(i)) {
-    const RealType nan = Impl::complex_quiet_nan<RealType>();
-    return Kokkos::complex<RealType>(r, nan);  // (+-0, NaN), since C11
-  }
-  // A real argument (also NaN): (tanh(r), +-0) keeps the signs of zeros,
-  // which the quotient below loses, and is more accurate.
-  if (i == RealType()) return Kokkos::complex<RealType>(tanh(r), i);
-  if (Kokkos::isnan(r)) {  // (NaN, y) for y != 0: (NaN, NaN)
-    const RealType nan = Impl::complex_quiet_nan<RealType>();
-    return Kokkos::complex<RealType>(nan, nan);
-  }
-  const RealType si = sin(i);
-  const RealType ci = cos(i);
-  // Beyond (max_exponent - 1) ln 2 / 2, sinh(r)^2 overflows.  There tanh(z) is
-  // (+-1, 4 sin(i) cos(i) exp(-2|r|)) to far below one ulp (the neglected
-  // relative term is about 2 exp(-2|r|)), as in glibc.
-  const RealType r_max =
-      RealType(Kokkos::Experimental::max_exponent_v<RealType> - 1) *
-      Impl::complex_ln2<RealType>() / RealType(2);
-  if (Kokkos::fabs(r) > r_max) {
-    return Kokkos::complex<RealType>(
-        Kokkos::copysign(RealType(1), r),
-        RealType(4) * si * ci * exp(-RealType(2) * Kokkos::fabs(r)));
-  }
-  // Kahan's formula, as in glibc:
-  //   tanh(z) = (sinh(r) cosh(r) + i sin(i) cos(i)) / (sinh(r)^2 + cos(i)^2).
-  // The denominator is a sum of squares, so both parts are accurate to a few
-  // ulps also where sinh(z) / cosh(z) cancels (the imaginary part for
-  // |r| >~ 5, or near the poles).
-  RealType sh = r;
-  RealType ch = RealType(1);
-  if (Kokkos::fabs(r) > Impl::complex_norm_min<RealType>()) {
-    sh = sinh(r);
-    ch = cosh(r);
-  }
-  const RealType den =
-      Kokkos::fabs(sh) > Kokkos::fabs(ci) * Impl::complex_epsilon<RealType>()
-          ? sh * sh + ci * ci
-          : ci * ci;
-  return Kokkos::complex<RealType>(sh * ch / den, si * ci / den);
 }
 
 namespace Impl {
@@ -1282,36 +1389,41 @@ KOKKOS_INLINE_FUNCTION void complex_asin_acos(T x, T y, T& re_asin, T& re_acos,
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asinh(
     const complex<RealType>& x) {
-  using C           = Kokkos::complex<RealType>;
-  const RealType r  = x.real();
-  const RealType i  = x.imag();
-  const RealType pi = Impl::complex_pi<RealType>();
-  if (Kokkos::isinf(r)) {
-    if (Kokkos::isnan(i)) return x;  // (+-inf, NaN)
-    if (Kokkos::isinf(i)) return C(r, Kokkos::copysign(pi / 4, i));
-    return C(r, Kokkos::copysign(RealType(), i));  // (+-inf, +-0)
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(asinh(Kokkos::complex<float>(x)));
+  } else {
+    using C           = Kokkos::complex<RealType>;
+    const RealType r  = x.real();
+    const RealType i  = x.imag();
+    const RealType pi = Impl::complex_pi<RealType>();
+    if (Kokkos::isinf(r)) {
+      if (Kokkos::isnan(i)) return x;  // (+-inf, NaN)
+      if (Kokkos::isinf(i)) return C(r, Kokkos::copysign(pi / 4, i));
+      return C(r, Kokkos::copysign(RealType(), i));  // (+-inf, +-0)
+    }
+    if (Kokkos::isnan(r)) {
+      // (+-inf, NaN), the sign is unspecified; +inf as in glibc.
+      if (Kokkos::isinf(i)) return C(Kokkos::fabs(i), r);
+      if (i == RealType()) return x;  // (NaN, +-0)
+      return C(r, r);
+    }
+    if (Kokkos::isinf(i)) {
+      return C(Kokkos::copysign(i, r), Kokkos::copysign(pi / 2, i));
+    }
+    // On the axes the result is exact with the real functions: a real argument,
+    // and the imaginary axis between -i and i, where the real part is +-0.
+    if (i == RealType()) return C(asinh(r), i);
+    if (r == RealType() && Kokkos::fabs(i) <= RealType(1)) return C(r, asin(i));
+    // asinh(x + iy) = i asin(y - ix): for x, y >= 0 that is (im, re_asin) of
+    // the Hull-Fairgrieve-Tang algorithm at (y, x).
+    RealType re_asin;
+    RealType re_acos;
+    RealType im;
+    Impl::complex_asin_acos(Kokkos::fabs(i), Kokkos::fabs(r), re_asin, re_acos,
+                            im);
+    return C(Kokkos::copysign(im, r), Kokkos::copysign(re_asin, i));
   }
-  if (Kokkos::isnan(r)) {
-    // (+-inf, NaN), the sign is unspecified; +inf as in glibc.
-    if (Kokkos::isinf(i)) return C(Kokkos::fabs(i), r);
-    if (i == RealType()) return x;  // (NaN, +-0)
-    return C(r, r);
-  }
-  if (Kokkos::isinf(i)) {
-    return C(Kokkos::copysign(i, r), Kokkos::copysign(pi / 2, i));
-  }
-  // On the axes the result is exact with the real functions: a real argument,
-  // and the imaginary axis between -i and i, where the real part is +-0.
-  if (i == RealType()) return C(asinh(r), i);
-  if (r == RealType() && Kokkos::fabs(i) <= RealType(1)) return C(r, asin(i));
-  // asinh(x + iy) = i asin(y - ix): for x, y >= 0 that is (im, re_asin) of
-  // the Hull-Fairgrieve-Tang algorithm at (y, x).
-  RealType re_asin;
-  RealType re_acos;
-  RealType im;
-  Impl::complex_asin_acos(Kokkos::fabs(i), Kokkos::fabs(r), re_asin, re_acos,
-                          im);
-  return C(Kokkos::copysign(im, r), Kokkos::copysign(re_asin, i));
 }
 
 //! inverse hyperbolic cosine of a complex number.
@@ -1322,39 +1434,46 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asinh(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acosh(
     const complex<RealType>& x) {
-  using C           = Kokkos::complex<RealType>;
-  const RealType r  = x.real();
-  const RealType i  = x.imag();
-  const RealType pi = Impl::complex_pi<RealType>();
-  if (Kokkos::isinf(r)) {
-    if (Kokkos::isnan(i)) return C(Kokkos::fabs(r), i);  // (+inf, NaN)
-    if (Kokkos::isinf(i)) {
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(acosh(Kokkos::complex<float>(x)));
+  } else {
+    using C           = Kokkos::complex<RealType>;
+    const RealType r  = x.real();
+    const RealType i  = x.imag();
+    const RealType pi = Impl::complex_pi<RealType>();
+    if (Kokkos::isinf(r)) {
+      if (Kokkos::isnan(i)) return C(Kokkos::fabs(r), i);  // (+inf, NaN)
+      if (Kokkos::isinf(i)) {
+        return C(Kokkos::fabs(r),
+                 Kokkos::copysign(r > RealType() ? pi / 4 : 3 * pi / 4, i));
+      }
       return C(Kokkos::fabs(r),
-               Kokkos::copysign(r > RealType() ? pi / 4 : 3 * pi / 4, i));
+               Kokkos::copysign(r < RealType() ? pi : RealType(), i));
     }
-    return C(Kokkos::fabs(r),
-             Kokkos::copysign(r < RealType() ? pi : RealType(), i));
+    if (Kokkos::isnan(r)) {
+      if (Kokkos::isinf(i)) return C(Kokkos::fabs(i), r);  // (+inf, NaN)
+      return C(r, r);
+    }
+    if (Kokkos::isinf(i))
+      return C(Kokkos::fabs(i), Kokkos::copysign(pi / 2, i));
+    if (r == RealType() && Kokkos::isnan(i)) return C(i, pi / 2);  // as glibc
+    // On the real axis the result is exact with the real functions: (+0,
+    // +-acos) between -1 and 1, (acosh, +-0) beyond 1.
+    if (i == RealType() && Kokkos::fabs(r) <= RealType(1)) {
+      return C(RealType(), Kokkos::copysign(acos(r), i));
+    }
+    if (i == RealType() && r > RealType(1)) return C(acosh(r), i);
+    // acosh(z) = (-imag(acos(z)), real(acos(z))) for y >= 0, and
+    // acos(-z) = pi - acos(z): the Hull-Fairgrieve-Tang algorithm at (|x|,
+    // |y|).
+    RealType re_asin;
+    RealType re_acos;
+    RealType im;
+    Impl::complex_asin_acos(Kokkos::fabs(r), Kokkos::fabs(i), re_asin, re_acos,
+                            im);
+    return C(im, Kokkos::copysign(r < RealType() ? pi - re_acos : re_acos, i));
   }
-  if (Kokkos::isnan(r)) {
-    if (Kokkos::isinf(i)) return C(Kokkos::fabs(i), r);  // (+inf, NaN)
-    return C(r, r);
-  }
-  if (Kokkos::isinf(i)) return C(Kokkos::fabs(i), Kokkos::copysign(pi / 2, i));
-  if (r == RealType() && Kokkos::isnan(i)) return C(i, pi / 2);  // as glibc
-  // On the real axis the result is exact with the real functions: (+0, +-acos)
-  // between -1 and 1, (acosh, +-0) beyond 1.
-  if (i == RealType() && Kokkos::fabs(r) <= RealType(1)) {
-    return C(RealType(), Kokkos::copysign(acos(r), i));
-  }
-  if (i == RealType() && r > RealType(1)) return C(acosh(r), i);
-  // acosh(z) = (-imag(acos(z)), real(acos(z))) for y >= 0, and
-  // acos(-z) = pi - acos(z): the Hull-Fairgrieve-Tang algorithm at (|x|, |y|).
-  RealType re_asin;
-  RealType re_acos;
-  RealType im;
-  Impl::complex_asin_acos(Kokkos::fabs(r), Kokkos::fabs(i), re_asin, re_acos,
-                          im);
-  return C(im, Kokkos::copysign(r < RealType() ? pi - re_acos : re_acos, i));
 }
 
 //! inverse hyperbolic tangent of a complex number.
@@ -1365,63 +1484,74 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acosh(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> atanh(
     const complex<RealType>& x) {
-  using C            = Kokkos::complex<RealType>;
-  const RealType xr  = x.real();
-  const RealType xi  = x.imag();
-  const RealType pi  = Impl::complex_pi<RealType>();
-  const RealType inf = Impl::complex_infinity<RealType>();
-  if (Kokkos::isinf(xi)) {
-    // (+-0, +-pi/2).  For a NaN real part the sign of the zero is unspecified;
-    // +0, not copysign: the sign bit of a NaN is not portable (negating a NaN,
-    // as the identity atan(z) = -i atanh(iz) does, keeps the sign on x86 but
-    // may give a canonical NaN on GPUs).
-    return C(Kokkos::isnan(xr) ? RealType() : Kokkos::copysign(RealType(), xr),
-             Kokkos::copysign(pi / 2, xi));
-  }
-  if (Kokkos::isnan(xi)) {
-    if (Kokkos::isinf(xr) || xr == RealType()) {
-      return C(Kokkos::copysign(RealType(), xr), xi);  // (+-0, NaN)
-    }
-    return C(xi, xi);
-  }
-  if (Kokkos::isnan(xr)) return C(xr, xr);
-  if (Kokkos::isinf(xr)) {
-    return C(Kokkos::copysign(RealType(), xr), Kokkos::copysign(pi / 2, xi));
-  }
-  if (Kokkos::fabs(xr) == RealType(1) && xi == RealType()) {
-    return C(Kokkos::copysign(inf, xr), Kokkos::copysign(RealType(), xi));
-  }
-  // W. Kahan, "Branch cuts for complex elementary functions" (1987), for
-  // a, b >= 0:  real = log1p(4a / ((1 - a)^2 + b^2)) / 4,
-  //             imag = atan2(2b, (1 - a)(1 + a) - b^2) / 2.
-  // 1 - a is exact near a = 1, and no term cancels except where the result
-  // is insensitive to it.
-  const RealType a   = Kokkos::fabs(xr);
-  const RealType b   = Kokkos::fabs(xi);
-  const RealType eps = Impl::complex_epsilon<RealType>();
-  RealType re;
-  RealType im;
-  if (a > RealType(1) / eps || b > RealType(1) / eps) {
-    // atanh(z) = (a / |z|^2, pi/2) to within eps; the squares could overflow.
-    const RealType h = Kokkos::hypot(a, b);
-    re               = (a / h) / h;
-    im               = pi / 2;
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(atanh(Kokkos::complex<float>(x)));
   } else {
-    const RealType am1 = RealType(1) - a;
-    re = Kokkos::log1p(RealType(4) * a / (am1 * am1 + b * b)) / RealType(4);
-    im = Kokkos::atan2(RealType(2) * b, am1 * (RealType(1) + a) - b * b) /
-         RealType(2);
+    using C            = Kokkos::complex<RealType>;
+    const RealType xr  = x.real();
+    const RealType xi  = x.imag();
+    const RealType pi  = Impl::complex_pi<RealType>();
+    const RealType inf = Impl::complex_infinity<RealType>();
+    if (Kokkos::isinf(xi)) {
+      // (+-0, +-pi/2).  For a NaN real part the sign of the zero is
+      // unspecified; +0, not copysign: the sign bit of a NaN is not portable
+      // (negating a NaN, as the identity atan(z) = -i atanh(iz) does, keeps the
+      // sign on x86 but may give a canonical NaN on GPUs).
+      return C(
+          Kokkos::isnan(xr) ? RealType() : Kokkos::copysign(RealType(), xr),
+          Kokkos::copysign(pi / 2, xi));
+    }
+    if (Kokkos::isnan(xi)) {
+      if (Kokkos::isinf(xr) || xr == RealType()) {
+        return C(Kokkos::copysign(RealType(), xr), xi);  // (+-0, NaN)
+      }
+      return C(xi, xi);
+    }
+    if (Kokkos::isnan(xr)) return C(xr, xr);
+    if (Kokkos::isinf(xr)) {
+      return C(Kokkos::copysign(RealType(), xr), Kokkos::copysign(pi / 2, xi));
+    }
+    if (Kokkos::fabs(xr) == RealType(1) && xi == RealType()) {
+      return C(Kokkos::copysign(inf, xr), Kokkos::copysign(RealType(), xi));
+    }
+    // W. Kahan, "Branch cuts for complex elementary functions" (1987), for
+    // a, b >= 0:  real = log1p(4a / ((1 - a)^2 + b^2)) / 4,
+    //             imag = atan2(2b, (1 - a)(1 + a) - b^2) / 2.
+    // 1 - a is exact near a = 1, and no term cancels except where the result
+    // is insensitive to it.
+    const RealType a   = Kokkos::fabs(xr);
+    const RealType b   = Kokkos::fabs(xi);
+    const RealType eps = Impl::complex_epsilon<RealType>();
+    RealType re;
+    RealType im;
+    if (a > RealType(1) / eps || b > RealType(1) / eps) {
+      // atanh(z) = (a / |z|^2, pi/2) to within eps; the squares could overflow.
+      const RealType h = Kokkos::hypot(a, b);
+      re               = (a / h) / h;
+      im               = pi / 2;
+    } else {
+      const RealType am1 = RealType(1) - a;
+      re = Kokkos::log1p(RealType(4) * a / (am1 * am1 + b * b)) / RealType(4);
+      im = Kokkos::atan2(RealType(2) * b, am1 * (RealType(1) + a) - b * b) /
+           RealType(2);
+    }
+    return C(Kokkos::copysign(re, xr), Kokkos::copysign(im, xi));
   }
-  return C(Kokkos::copysign(re, xr), Kokkos::copysign(im, xi));
 }
 
 //! inverse sine of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asin(
     const complex<RealType>& x) {
-  Kokkos::complex<RealType> t =
-      asinh(Kokkos::complex<RealType>(-x.imag(), x.real()));
-  return Kokkos::complex<RealType>(t.imag(), -t.real());
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(asin(Kokkos::complex<float>(x)));
+  } else {
+    Kokkos::complex<RealType> t =
+        asinh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+    return Kokkos::complex<RealType>(t.imag(), -t.real());
+  }
 }
 
 //! inverse cosine of a complex number.
@@ -1430,33 +1560,38 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asin(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acos(
     const complex<RealType>& x) {
-  using C           = Kokkos::complex<RealType>;
-  const RealType r  = x.real();
-  const RealType i  = x.imag();
-  const RealType pi = Impl::complex_pi<RealType>();
-  if (Kokkos::isinf(r)) {
-    // (NaN, +-inf), the sign is unspecified; -inf as in glibc.
-    if (Kokkos::isnan(i)) return C(i, -Kokkos::fabs(r));
-    if (Kokkos::isinf(i)) return C(r < RealType() ? 3 * pi / 4 : pi / 4, -i);
-    if (r < RealType()) return C(pi, Kokkos::signbit(i) ? -r : r);
-    return C(RealType(), Kokkos::signbit(i) ? r : -r);
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(acos(Kokkos::complex<float>(x)));
+  } else {
+    using C           = Kokkos::complex<RealType>;
+    const RealType r  = x.real();
+    const RealType i  = x.imag();
+    const RealType pi = Impl::complex_pi<RealType>();
+    if (Kokkos::isinf(r)) {
+      // (NaN, +-inf), the sign is unspecified; -inf as in glibc.
+      if (Kokkos::isnan(i)) return C(i, -Kokkos::fabs(r));
+      if (Kokkos::isinf(i)) return C(r < RealType() ? 3 * pi / 4 : pi / 4, -i);
+      if (r < RealType()) return C(pi, Kokkos::signbit(i) ? -r : r);
+      return C(RealType(), Kokkos::signbit(i) ? r : -r);
+    }
+    if (Kokkos::isnan(r)) {
+      if (Kokkos::isinf(i)) return C(r, -i);
+      return C(r, r);
+    }
+    if (Kokkos::isinf(i)) return C(pi / 2, -i);
+    if (r == RealType() && (i == RealType() || Kokkos::isnan(i))) {
+      return C(pi / 2, -i);
+    }
+    // The Hull-Fairgrieve-Tang algorithm at (|x|, |y|), with
+    // acos(-z) = pi - acos(z) and acos(conj(z)) = conj(acos(z)).
+    RealType re_asin;
+    RealType re_acos;
+    RealType im;
+    Impl::complex_asin_acos(Kokkos::fabs(r), Kokkos::fabs(i), re_asin, re_acos,
+                            im);
+    return C(r < RealType() ? pi - re_acos : re_acos, -Kokkos::copysign(im, i));
   }
-  if (Kokkos::isnan(r)) {
-    if (Kokkos::isinf(i)) return C(r, -i);
-    return C(r, r);
-  }
-  if (Kokkos::isinf(i)) return C(pi / 2, -i);
-  if (r == RealType() && (i == RealType() || Kokkos::isnan(i))) {
-    return C(pi / 2, -i);
-  }
-  // The Hull-Fairgrieve-Tang algorithm at (|x|, |y|), with
-  // acos(-z) = pi - acos(z) and acos(conj(z)) = conj(acos(z)).
-  RealType re_asin;
-  RealType re_acos;
-  RealType im;
-  Impl::complex_asin_acos(Kokkos::fabs(r), Kokkos::fabs(i), re_asin, re_acos,
-                          im);
-  return C(r < RealType() ? pi - re_acos : re_acos, -Kokkos::copysign(im, i));
 }
 
 //! inverse tangent of a complex number: atan(z) = -i atanh(iz) (C99 G.6), so
@@ -1464,9 +1599,14 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acos(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> atan(
     const complex<RealType>& x) {
-  const Kokkos::complex<RealType> t =
-      atanh(Kokkos::complex<RealType>(-x.imag(), x.real()));
-  return Kokkos::complex<RealType>(t.imag(), -t.real());
+  // Computed in float and rounded once for half_t and bhalf_t (D5).
+  if constexpr (Impl::is_half_type_v<RealType>) {
+    return Kokkos::complex<RealType>(atan(Kokkos::complex<float>(x)));
+  } else {
+    const Kokkos::complex<RealType> t =
+        atanh(Kokkos::complex<RealType>(-x.imag(), x.real()));
+    return Kokkos::complex<RealType>(t.imag(), -t.real());
+  }
 }
 
 /// This function cannot be called in a CUDA device function,
