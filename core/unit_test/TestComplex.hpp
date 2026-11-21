@@ -886,6 +886,108 @@ TEST(TEST_CATEGORY, complex_arg_proj) {
   TestComplexArgProj<double, TEST_EXECSPACE>().testit();
 }
 
+// exp, sqrt and log on the grid {0, -0, 1, -1, 0.5, 2.5, inf, -inf, nan}^2,
+// compared with std::complex (glibc's C99 Annex G functions with libstdc++):
+// same class (NaN, infinite, zero, finite) and sign for every part, and
+// finite parts within a few eps.  Also polar with an infinite magnitude, and
+// sqrt on both sides of its branch cut.
+template <class RealType, class ExecSpace>
+struct TestComplexElementarySpecialValues {
+  using C                       = Kokkos::complex<RealType>;
+  static constexpr int NV       = 9;
+  static constexpr int N        = NV * NV;
+  static constexpr RealType inf = Kokkos::Experimental::infinity_v<RealType>;
+  static constexpr RealType nan = Kokkos::Experimental::quiet_NaN_v<RealType>;
+
+  Kokkos::View<C *, ExecSpace> d_in;
+  Kokkos::View<C *[3], ExecSpace> d_out;  // exp, sqrt, log
+  Kokkos::View<C[4], ExecSpace> d_polar;
+
+  TestComplexElementarySpecialValues()
+      : d_in("in", N), d_out("out", N), d_polar("polar") {}
+
+  KOKKOS_FUNCTION void operator()(int i) const {
+    d_out(i, 0) = Kokkos::exp(d_in(i));
+    d_out(i, 1) = Kokkos::sqrt(d_in(i));
+    d_out(i, 2) = Kokkos::log(d_in(i));
+    if (i == 0) {
+      // polar takes const T&: pass a local copy, not the static member
+      // (odr-use of a host variable in device code).
+      const RealType inf = TestComplexElementarySpecialValues::inf;
+      d_polar(0)         = Kokkos::polar(inf, RealType(0));
+      d_polar(1)         = Kokkos::polar(inf, -RealType(0));
+      d_polar(2)         = Kokkos::polar(inf, RealType(1));
+      d_polar(3)         = Kokkos::polar(RealType(2), RealType(0.5));
+    }
+  }
+
+  void testit() {
+    const RealType v[NV] = {
+        0, -RealType(0), 1, -1, RealType(0.5), RealType(2.5), inf, -inf, nan};
+    auto h_in = Kokkos::create_mirror_view(d_in);
+    for (int a = 0; a < NV; ++a)
+      for (int b = 0; b < NV; ++b) h_in(a * NV + b) = C(v[a], v[b]);
+    Kokkos::deep_copy(d_in, h_in);
+    Kokkos::parallel_for(Kokkos::RangePolicy<ExecSpace>(0, N), *this);
+    auto h_out =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
+    auto h_polar =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_polar);
+
+    auto kind = [](RealType x) {
+      return std::isnan(x) ? 0 : std::isinf(x) ? 1 : x == 0 ? 2 : 3;
+    };
+    // Device math functions may differ from the host libm in the last bits.
+    const RealType tol = 8 * Kokkos::Experimental::epsilon_v<RealType>;
+    auto check         = [&](RealType x, RealType e) {
+      if (kind(x) != kind(e)) return false;
+      if (kind(x) != 0 && std::signbit(x) != std::signbit(e)) return false;
+      return kind(x) != 3 || std::abs(x - e) <= tol * std::abs(e);
+    };
+    const char *names[3] = {"exp", "sqrt", "log"};
+    for (int i = 0; i < N; ++i) {
+      const std::complex<RealType> z(h_in(i).real(), h_in(i).imag());
+      const std::complex<RealType> e[3] = {std::exp(z), std::sqrt(z),
+                                           std::log(z)};
+      for (int f = 0; f < 3; ++f) {
+        EXPECT_TRUE(check(h_out(i, f).real(), e[f].real()) &&
+                    check(h_out(i, f).imag(), e[f].imag()))
+            << names[f] << h_in(i) << " = " << h_out(i, f) << ", std gives "
+            << e[f];
+      }
+    }
+
+    // sqrt is continuous from either side of the branch cut: the sign of
+    // the imaginary part follows that of the input, also for -0.
+    auto at = [&](RealType a, RealType b) {
+      for (int i = 0; i < N; ++i)
+        if (h_in(i).real() == a && h_in(i).imag() == b &&
+            std::signbit(h_in(i).real()) == std::signbit(a) &&
+            std::signbit(h_in(i).imag()) == std::signbit(b))
+          return i;
+      return -1;
+    };
+    EXPECT_EQ(h_out(at(-1, -RealType(0)), 1), C(0, -1));
+    EXPECT_EQ(h_out(at(-1, RealType(0)), 1), C(0, 1));
+
+    // polar(inf, +-0) is (inf, +-0) as in libc++ (libstdc++ gives
+    // (inf, nan) from inf * sin(0)).
+    EXPECT_EQ(h_polar(0).real(), inf);
+    EXPECT_TRUE(h_polar(0).imag() == 0 && !std::signbit(h_polar(0).imag()));
+    EXPECT_EQ(h_polar(1).real(), inf);
+    EXPECT_TRUE(h_polar(1).imag() == 0 && std::signbit(h_polar(1).imag()));
+    EXPECT_EQ(h_polar(2), C(inf, inf));
+    const std::complex<RealType> p = std::polar(RealType(2), RealType(0.5));
+    EXPECT_NEAR(h_polar(3).real(), p.real(), tol * 2);
+    EXPECT_NEAR(h_polar(3).imag(), p.imag(), tol * 2);
+  }
+};
+
+TEST(TEST_CATEGORY, complex_exp_sqrt_log_special_values) {
+  TestComplexElementarySpecialValues<float, TEST_EXECSPACE>().testit();
+  TestComplexElementarySpecialValues<double, TEST_EXECSPACE>().testit();
+}
+
 template <class ExecSpace>
 struct TestComplexStructuredBindings {
   using exec_space       = ExecSpace;

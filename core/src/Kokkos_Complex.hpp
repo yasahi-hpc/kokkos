@@ -766,8 +766,15 @@ KOKKOS_INLINE_FUNCTION constexpr Impl::promote_t<ArithmeticType> real(
 //! Constructs a complex number from magnitude and phase angle
 template <class T>
 KOKKOS_INLINE_FUNCTION complex<T> polar(const T& r, const T& theta = T()) {
+  // As for std::polar, r must be non-negative and non-NaN, and theta finite.
   KOKKOS_EXPECTS(r >= 0);
-  return complex<T>(r * cos(theta), r * sin(theta));
+  T x = r * cos(theta);
+  T y = r * sin(theta);
+  // r = inf with cos(theta) or sin(theta) = 0 (theta = +-0): inf * 0 is NaN,
+  // but the part is 0 (with the sign of the product), as in libc++.
+  if (Kokkos::isnan(x)) x = T(0);
+  if (Kokkos::isnan(y)) y = Kokkos::copysign(T(0), theta);
+  return complex<T>(x, y);
 }
 
 //! Absolute value (magnitude) of a complex number.
@@ -824,15 +831,32 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sqrt(
   RealType r = x.real();
   RealType i = x.imag();
 
+  // Special values, as specified by C99 Annex G (G.6.4.2) and done by libc++.
+  if (Kokkos::isinf(i)) {
+    constexpr RealType inf = Kokkos::infinity_v<RealType>;
+    return Kokkos::complex<RealType>(inf, i);  // also for a NaN real part
+  }
+  if (Kokkos::isinf(r)) {
+    if (r > RealType()) {  // (+inf, y): (+inf, +-0), or (+inf, NaN)
+      return Kokkos::complex<RealType>(
+          r, Kokkos::isnan(i) ? i : Kokkos::copysign(RealType(), i));
+    }
+    // (-inf, y): (+0, +-inf), or (NaN, +-inf)
+    return Kokkos::complex<RealType>(Kokkos::isnan(i) ? i : RealType(),
+                                     Kokkos::copysign(r, i));
+  }
+
+  // The sign of the imaginary part follows that of i, also for i = -0, so
+  // that sqrt is continuous from either side of the branch cut (C99 G.6.4.2).
   if (r == RealType()) {
     RealType t = sqrt(fabs(i) / 2);
-    return Kokkos::complex<RealType>(t, i < RealType() ? -t : t);
+    return Kokkos::complex<RealType>(t, Kokkos::copysign(t, i));
   } else {
     RealType t = sqrt(2 * (abs(x) + fabs(r)));
     RealType u = t / 2;
-    return r > RealType() ? Kokkos::complex<RealType>(u, i / t)
-                          : Kokkos::complex<RealType>(fabs(i) / t,
-                                                      i < RealType() ? -u : u);
+    return r > RealType()
+               ? Kokkos::complex<RealType>(u, i / t)
+               : Kokkos::complex<RealType>(fabs(i) / t, Kokkos::copysign(u, i));
   }
 }
 
@@ -900,7 +924,26 @@ KOKKOS_INLINE_FUNCTION complex<Impl::promote_t<ArithmeticType>> proj(
 //! Exponential of a complex number.
 template <class RealType>
 KOKKOS_INLINE_FUNCTION complex<RealType> exp(const complex<RealType>& x) {
-  return exp(x.real()) * complex<RealType>(cos(x.imag()), sin(x.imag()));
+  const RealType r = x.real();
+  RealType i       = x.imag();
+  // Special values, as specified by C99 Annex G (G.6.3.1) and done by libc++.
+  if (i == RealType()) {  // exp of a real number; keeps the sign of i
+    return complex<RealType>(exp(r), i);
+  }
+  if (Kokkos::isinf(r)) {
+    if (r < RealType()) {  // (-inf, y): (+-0, +-0) for y infinite or NaN
+      // The signs are unspecified; copysign gives glibc's (0, -0) for -inf.
+      if (!Kokkos::isfinite(i)) i = Kokkos::copysign(RealType(1), i);
+    } else if (!Kokkos::isfinite(i)) {  // (+inf, inf or NaN): (+-inf, NaN)
+      if (Kokkos::isinf(i)) {
+        constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+        i                      = nan;
+      }
+      return complex<RealType>(r, i);
+    }
+  }
+  const RealType e = exp(r);
+  return complex<RealType>(e * cos(i), e * sin(i));
 }
 
 //! natural log of a complex number.
