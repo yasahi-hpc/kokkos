@@ -8,6 +8,7 @@
 #endif
 
 #include <Kokkos_Atomic.hpp>
+#include <Kokkos_Half.hpp>
 #include <Kokkos_MathematicalConstants.hpp>
 #include <Kokkos_MathematicalFunctions.hpp>
 #include <Kokkos_NumericTraits.hpp>
@@ -21,6 +22,41 @@
 namespace Kokkos {
 
 namespace Impl {
+
+// The constants the algorithms below use, as values of T. For the standard
+// floating-point types they are the constexpr numeric traits and <numbers>
+// constants. For half_t and bhalf_t the numeric traits are
+// BitComparisonWrapper (converted to T at run time) and <numbers> has no
+// constants, so they are converted from double (exactly rounded) at run time;
+// constexpr half is future work (B4). The algorithms therefore hold them in
+// const, not constexpr, locals.
+#define KOKKOS_IMPL_COMPLEX_TRAIT_CONSTANT(NAME, TRAIT)          \
+  template <class T>                                             \
+  KOKKOS_INLINE_FUNCTION constexpr T complex_##NAME() noexcept { \
+    if constexpr (std::is_floating_point_v<T>) {                 \
+      return Kokkos::Experimental::TRAIT##_v<T>;                 \
+    } else {                                                     \
+      return T(Kokkos::Experimental::TRAIT##_v<T>);              \
+    }                                                            \
+  }
+KOKKOS_IMPL_COMPLEX_TRAIT_CONSTANT(infinity, infinity)
+KOKKOS_IMPL_COMPLEX_TRAIT_CONSTANT(quiet_nan, quiet_NaN)
+KOKKOS_IMPL_COMPLEX_TRAIT_CONSTANT(epsilon, epsilon)
+KOKKOS_IMPL_COMPLEX_TRAIT_CONSTANT(finite_max, finite_max)
+KOKKOS_IMPL_COMPLEX_TRAIT_CONSTANT(norm_min, norm_min)
+#undef KOKKOS_IMPL_COMPLEX_TRAIT_CONSTANT
+#define KOKKOS_IMPL_COMPLEX_MATH_CONSTANT(NAME)                  \
+  template <class T>                                             \
+  KOKKOS_INLINE_FUNCTION constexpr T complex_##NAME() noexcept { \
+    if constexpr (std::is_floating_point_v<T>) {                 \
+      return Kokkos::numbers::NAME##_v<T>;                       \
+    } else {                                                     \
+      return T(Kokkos::numbers::NAME##_v<double>);               \
+    }                                                            \
+  }
+KOKKOS_IMPL_COMPLEX_MATH_CONSTANT(pi)
+KOKKOS_IMPL_COMPLEX_MATH_CONSTANT(ln2)
+#undef KOKKOS_IMPL_COMPLEX_MATH_CONSTANT
 
 // |x| for the comparisons in complex_divide_smith: Kokkos::fabs at run time,
 // and a comparison during constant evaluation (Kokkos::fabs is not constexpr).
@@ -44,19 +80,19 @@ template <class Fabs, class T>
 KOKKOS_INLINE_FUNCTION constexpr void complex_divide_smith(
     T a, T b, T c, T d, T& x, T& y) noexcept(noexcept(T{} / T{})) {
   // Thresholds of libgcc's RBIG, RMIN, RMIN2, RMINSCAL and RMAX2.
-  constexpr T rbig     = Kokkos::finite_max_v<T> / 2;
-  constexpr T rmin     = Kokkos::norm_min_v<T>;
-  constexpr T rmin2    = Kokkos::epsilon_v<T>;
-  constexpr T rminscal = T(1) / Kokkos::epsilon_v<T>;
-  constexpr T rmax2    = rbig * rmin2;
+  const T rbig     = complex_finite_max<T>() / T(2);
+  const T rmin     = complex_norm_min<T>();
+  const T rmin2    = complex_epsilon<T>();
+  const T rminscal = T(1) / complex_epsilon<T>();
+  const T rmax2    = rbig * rmin2;
 
   if (Fabs::apply(c) < Fabs::apply(d)) {
     // Prevent underflow when the denominator is near the largest value.
     if (Fabs::apply(d) >= rbig) {
-      a /= 2;
-      b /= 2;
-      c /= 2;
-      d /= 2;
+      a /= T(2);
+      b /= T(2);
+      c /= T(2);
+      d /= T(2);
     }
     // Scale up small operands to avoid underflow; no new overflow is possible.
     if (Fabs::apply(d) < rmin2 ||
@@ -81,10 +117,10 @@ KOKKOS_INLINE_FUNCTION constexpr void complex_divide_smith(
     }
   } else {
     if (Fabs::apply(c) >= rbig) {
-      a /= 2;
-      b /= 2;
-      c /= 2;
-      d /= 2;
+      a /= T(2);
+      b /= T(2);
+      c /= T(2);
+      d /= T(2);
     }
     if (Fabs::apply(c) < rmin2 ||
         (Fabs::apply(a) < rmin && Fabs::apply(b) < rmax2 &&
@@ -134,8 +170,8 @@ KOKKOS_INLINE_FUNCTION constexpr void complex_divide(
 #else
   if (__builtin_is_constant_evaluated()) {
 #endif
-    constexpr T inf = Kokkos::infinity_v<T>;
-    auto finite     = [](T v) { return v == v && v != inf && v != -inf; };
+    const T inf = complex_infinity<T>();
+    auto finite = [inf](T v) { return v == v && v != inf && v != -inf; };
     if (!(finite(a) && finite(b) && finite(c) && finite(d)) ||
         (c == T(0) && d == T(0))) {
       complex_division_by_zero_or_of_inf_or_nan_is_not_a_constant_expression();
@@ -156,7 +192,7 @@ KOKKOS_INLINE_FUNCTION constexpr void complex_divide(
 
   // Recover infinities and zeros that computed as NaN + iNaN.
   if (Kokkos::isnan(x) && Kokkos::isnan(y)) {
-    constexpr T inf = Kokkos::infinity_v<T>;
+    const T inf = complex_infinity<T>();
     if (c0 == T(0) && d0 == T(0) &&
         (!Kokkos::isnan(a0) || !Kokkos::isnan(b0))) {
       x = Kokkos::copysign(inf, c0) * a0;
@@ -202,8 +238,8 @@ KOKKOS_INLINE_FUNCTION constexpr void complex_multiply(T a, T b, T c, T d,
 #else
   if (__builtin_is_constant_evaluated()) {
 #endif
-    constexpr T inf = Kokkos::infinity_v<T>;
-    auto finite     = [](T v) { return v == v && v != inf && v != -inf; };
+    const T inf = complex_infinity<T>();
+    auto finite = [inf](T v) { return v == v && v != inf && v != -inf; };
     if (!(finite(a) && finite(b) && finite(c) && finite(d))) {
       complex_multiplication_of_inf_or_nan_is_not_a_constant_expression();
     }
@@ -243,9 +279,9 @@ KOKKOS_INLINE_FUNCTION constexpr void complex_multiply(T a, T b, T c, T d,
       recalc = true;
     }
     if (recalc) {
-      constexpr T inf = Kokkos::infinity_v<T>;
-      x               = inf * (a * c - b * d);
-      y               = inf * (a * d + b * c);
+      const T inf = complex_infinity<T>();
+      x           = inf * (a * c - b * d);
+      y           = inf * (a * d + b * c);
     }
   }
   re = x;
@@ -258,12 +294,17 @@ template <class RealType>
 class complex;
 
 namespace Impl {
-// The types complex<T> can be instantiated for.  The scalar overloads that
-// return complex<promote_t<T>> (conj, proj) are constrained on it, so that
-// they are absent, rather than a hard error, for other types.
+// The types complex<T> can be instantiated for: the cv-unqualified standard
+// floating-point types and the extended ones half_t and bhalf_t (when they are
+// not aliases of float). The scalar overloads that return
+// complex<promote_t<T>> (conj, proj) are constrained on it, so that they are
+// absent, rather than a hard error, for other types.
 template <class T>
 inline constexpr bool is_complex_value_type_v =
-    std::is_floating_point_v<T> && std::is_same_v<T, std::remove_cv_t<T>>;
+    std::is_same_v<T, std::remove_cv_t<T>> &&
+    (std::is_floating_point_v<T> ||
+     Kokkos::Experimental::Impl::is_float16<T>::value ||
+     Kokkos::Experimental::Impl::is_bfloat16<T>::value);
 template <class T, class = void>
 struct complex_promote {};
 template <class T>
@@ -277,9 +318,10 @@ struct complex_promote<
 /// \brief Partial reimplementation of std::complex that works as the
 ///   result of a Kokkos::parallel_reduce.
 /// \tparam RealType The type of the real and imaginary parts of the
-///   complex number.  As with std::complex, this is only defined for
-///   \c float, \c double, and <tt>long double</tt>.  The latter is
-///   currently forbidden in CUDA device kernels.
+///   complex number: \c float, \c double, <tt>long double</tt>
+///   (forbidden in CUDA device kernels), or the extended floating-point types
+///   Kokkos::Experimental::half_t and bhalf_t (as std::complex since C++23
+///   supports std::float16_t and std::bfloat16_t).
 template <class RealType>
 class
 #ifdef KOKKOS_ENABLE_COMPLEX_ALIGN
@@ -288,7 +330,8 @@ class
         complex {
   static_assert(Impl::is_complex_value_type_v<RealType>,
                 "Kokkos::complex can only be instantiated for a cv-unqualified "
-                "floating point type");
+                "floating point type (including Kokkos::Experimental::half_t "
+                "and bhalf_t)");
 
  private:
   RealType re_{};
@@ -852,7 +895,7 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sqrt(
 
   // Special values, as specified by C99 Annex G (G.6.4.2) and done by libc++.
   if (Kokkos::isinf(i)) {
-    constexpr RealType inf = Kokkos::infinity_v<RealType>;
+    const RealType inf = Impl::complex_infinity<RealType>();
     return Kokkos::complex<RealType>(inf, i);  // also for a NaN real part
   }
   if (Kokkos::isinf(r)) {
@@ -926,8 +969,8 @@ template <class RealType>
 KOKKOS_INLINE_FUNCTION complex<RealType> proj(const complex<RealType>& x) {
   if (Kokkos::isinf(x.real()) || Kokkos::isinf(x.imag())) {
     // A local copy: binding infinity_v to the const& parameter would odr-use
-    // a host-only variable in device code.
-    constexpr RealType inf = Kokkos::infinity_v<RealType>;
+    // a host-only variable in device code.  (Not constexpr, for half_t.)
+    const RealType inf = Impl::complex_infinity<RealType>();
     return complex<RealType>(inf, Kokkos::copysign(RealType(0), x.imag()));
   }
   return x;
@@ -956,8 +999,8 @@ KOKKOS_INLINE_FUNCTION complex<RealType> exp(const complex<RealType>& x) {
       if (!Kokkos::isfinite(i)) i = Kokkos::copysign(RealType(1), i);
     } else if (!Kokkos::isfinite(i)) {  // (+inf, inf or NaN): (+-inf, NaN)
       if (Kokkos::isinf(i)) {
-        constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
-        i                      = nan;
+        const RealType nan = Impl::complex_quiet_nan<RealType>();
+        i                  = nan;
       }
       return complex<RealType>(r, i);
     }
@@ -1022,7 +1065,7 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sinh(
   if ((Kokkos::isinf(r) || r == RealType()) && !Kokkos::isfinite(i)) {
     // (+-inf, NaN) or (+-0, NaN).  The sign of an infinite real part is
     // unspecified; +inf as in glibc.
-    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    const RealType nan = Impl::complex_quiet_nan<RealType>();
     return Kokkos::complex<RealType>(Kokkos::isinf(r) ? Kokkos::fabs(r) : r,
                                      nan);
   }
@@ -1038,12 +1081,12 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> cosh(
   const RealType i = x.imag();
   // Special values, as specified by C99 Annex G (G.6.2.4), as in libc++.
   if (Kokkos::isinf(r) && !Kokkos::isfinite(i)) {
-    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    const RealType nan = Impl::complex_quiet_nan<RealType>();
     return Kokkos::complex<RealType>(Kokkos::fabs(r), nan);  // (inf, NaN)
   }
   if (r == RealType() && !Kokkos::isfinite(i)) {
     // (NaN, +-0), the sign is unspecified; +0 as in glibc.
-    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    const RealType nan = Impl::complex_quiet_nan<RealType>();
     return Kokkos::complex<RealType>(nan, RealType());
   }
   if (i == RealType() && !Kokkos::isfinite(r)) {
@@ -1077,14 +1120,14 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tanh(
         Kokkos::copysign(RealType(), sin(RealType(2) * i)));
   }
   if (r == RealType() && !Kokkos::isfinite(i)) {
-    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    const RealType nan = Impl::complex_quiet_nan<RealType>();
     return Kokkos::complex<RealType>(r, nan);  // (+-0, NaN), since C11
   }
   // A real argument (also NaN): (tanh(r), +-0) keeps the signs of zeros,
   // which the quotient below loses, and is more accurate.
   if (i == RealType()) return Kokkos::complex<RealType>(tanh(r), i);
   if (Kokkos::isnan(r)) {  // (NaN, y) for y != 0: (NaN, NaN)
-    constexpr RealType nan = Kokkos::quiet_NaN_v<RealType>;
+    const RealType nan = Impl::complex_quiet_nan<RealType>();
     return Kokkos::complex<RealType>(nan, nan);
   }
   const RealType si = sin(i);
@@ -1092,9 +1135,9 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tanh(
   // Beyond (max_exponent - 1) ln 2 / 2, sinh(r)^2 overflows.  There tanh(z) is
   // (+-1, 4 sin(i) cos(i) exp(-2|r|)) to far below one ulp (the neglected
   // relative term is about 2 exp(-2|r|)), as in glibc.
-  constexpr RealType r_max =
+  const RealType r_max =
       RealType(Kokkos::Experimental::max_exponent_v<RealType> - 1) *
-      Kokkos::numbers::ln2_v<RealType> / 2;
+      Impl::complex_ln2<RealType>() / RealType(2);
   if (Kokkos::fabs(r) > r_max) {
     return Kokkos::complex<RealType>(
         Kokkos::copysign(RealType(1), r),
@@ -1107,13 +1150,12 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> tanh(
   // |r| >~ 5, or near the poles).
   RealType sh = r;
   RealType ch = RealType(1);
-  if (Kokkos::fabs(r) > Kokkos::Experimental::norm_min_v<RealType>) {
+  if (Kokkos::fabs(r) > Impl::complex_norm_min<RealType>()) {
     sh = sinh(r);
     ch = cosh(r);
   }
   const RealType den =
-      Kokkos::fabs(sh) >
-              Kokkos::fabs(ci) * Kokkos::Experimental::epsilon_v<RealType>
+      Kokkos::fabs(sh) > Kokkos::fabs(ci) * Impl::complex_epsilon<RealType>()
           ? sh * sh + ci * ci
           : ci * ci;
   return Kokkos::complex<RealType>(sh * ch / den, si * ci / den);
@@ -1135,11 +1177,11 @@ namespace Impl {
 template <class T>
 KOKKOS_INLINE_FUNCTION void complex_asin_acos(T x, T y, T& re_asin, T& re_acos,
                                               T& im) {
-  constexpr T eps     = Kokkos::Experimental::epsilon_v<T>;
-  constexpr T big     = Kokkos::Experimental::finite_max_v<T> / 4;
-  constexpr T ln2     = Kokkos::numbers::ln2_v<T>;
-  constexpr T b_cross = T(0.6417);  // crossover points of the paper
-  constexpr T a_cross = T(1.5);
+  const T eps     = complex_epsilon<T>();
+  const T big     = complex_finite_max<T>() / T(4);
+  const T ln2     = complex_ln2<T>();
+  const T b_cross = T(0.6417);  // crossover points of the paper
+  const T a_cross = T(1.5);
   if (x > big || y > big) {
     // r + s could overflow.  Here asin(z) = (atan2(x, y), log(2|z|)) to far
     // below one ulp; 2|z| = 4 |z / 2| avoids overflow.
@@ -1209,10 +1251,10 @@ KOKKOS_INLINE_FUNCTION void complex_asin_acos(T x, T y, T& re_asin, T& re_acos,
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asinh(
     const complex<RealType>& x) {
-  using C               = Kokkos::complex<RealType>;
-  const RealType r      = x.real();
-  const RealType i      = x.imag();
-  constexpr RealType pi = Kokkos::numbers::pi_v<RealType>;
+  using C           = Kokkos::complex<RealType>;
+  const RealType r  = x.real();
+  const RealType i  = x.imag();
+  const RealType pi = Impl::complex_pi<RealType>();
   if (Kokkos::isinf(r)) {
     if (Kokkos::isnan(i)) return x;  // (+-inf, NaN)
     if (Kokkos::isinf(i)) return C(r, Kokkos::copysign(pi / 4, i));
@@ -1249,10 +1291,10 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asinh(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acosh(
     const complex<RealType>& x) {
-  using C               = Kokkos::complex<RealType>;
-  const RealType r      = x.real();
-  const RealType i      = x.imag();
-  constexpr RealType pi = Kokkos::numbers::pi_v<RealType>;
+  using C           = Kokkos::complex<RealType>;
+  const RealType r  = x.real();
+  const RealType i  = x.imag();
+  const RealType pi = Impl::complex_pi<RealType>();
   if (Kokkos::isinf(r)) {
     if (Kokkos::isnan(i)) return C(Kokkos::fabs(r), i);  // (+inf, NaN)
     if (Kokkos::isinf(i)) {
@@ -1292,11 +1334,11 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acosh(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> atanh(
     const complex<RealType>& x) {
-  using C                = Kokkos::complex<RealType>;
-  const RealType xr      = x.real();
-  const RealType xi      = x.imag();
-  constexpr RealType pi  = Kokkos::numbers::pi_v<RealType>;
-  constexpr RealType inf = Kokkos::infinity_v<RealType>;
+  using C            = Kokkos::complex<RealType>;
+  const RealType xr  = x.real();
+  const RealType xi  = x.imag();
+  const RealType pi  = Impl::complex_pi<RealType>();
+  const RealType inf = Impl::complex_infinity<RealType>();
   if (Kokkos::isinf(xi)) {
     // (+-0, +-pi/2).  For a NaN real part the sign of the zero is unspecified;
     // +0, not copysign: the sign bit of a NaN is not portable (negating a NaN,
@@ -1323,9 +1365,9 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> atanh(
   //             imag = atan2(2b, (1 - a)(1 + a) - b^2) / 2.
   // 1 - a is exact near a = 1, and no term cancels except where the result
   // is insensitive to it.
-  const RealType a       = Kokkos::fabs(xr);
-  const RealType b       = Kokkos::fabs(xi);
-  constexpr RealType eps = Kokkos::Experimental::epsilon_v<RealType>;
+  const RealType a   = Kokkos::fabs(xr);
+  const RealType b   = Kokkos::fabs(xi);
+  const RealType eps = Impl::complex_epsilon<RealType>();
   RealType re;
   RealType im;
   if (a > RealType(1) / eps || b > RealType(1) / eps) {
@@ -1357,10 +1399,10 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> asin(
 template <class RealType>
 KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> acos(
     const complex<RealType>& x) {
-  using C               = Kokkos::complex<RealType>;
-  const RealType r      = x.real();
-  const RealType i      = x.imag();
-  constexpr RealType pi = Kokkos::numbers::pi_v<RealType>;
+  using C           = Kokkos::complex<RealType>;
+  const RealType r  = x.real();
+  const RealType i  = x.imag();
+  const RealType pi = Impl::complex_pi<RealType>();
   if (Kokkos::isinf(r)) {
     // (NaN, +-inf), the sign is unspecified; -inf as in glibc.
     if (Kokkos::isnan(i)) return C(i, -Kokkos::fabs(r));
@@ -1446,12 +1488,28 @@ operator/(const RealType1& x,
 // still needed: std::complex's operators are templates on complex<T>, and T
 // cannot be deduced from Kokkos::complex (implicit conversions are not
 // considered during deduction), and operator>> needs an lvalue std::complex.
+//
+// For half_t and bhalf_t, a standard std::complex is used instead of
+// std::complex<half_t> (unspecified for a class type): std::complex<float> for
+// writing, which holds every half value exactly, and std::complex<double> for
+// reading, which then rounds once to the half type (through float it would
+// round twice).  This matches the scalar operators of half_t and bhalf_t.
+namespace Impl {
+template <class RealType>
+using complex_ostream_t =
+    std::conditional_t<std::is_floating_point_v<RealType>, RealType, float>;
+template <class RealType>
+using complex_istream_t =
+    std::conditional_t<std::is_floating_point_v<RealType>, RealType, double>;
+}  // namespace Impl
 
 /// \brief Insertion operator: writes "(real,imag)" as std::complex does.
 template <class RealType, class CharT, class Traits>
 std::basic_ostream<CharT, Traits>& operator<<(
     std::basic_ostream<CharT, Traits>& os, const complex<RealType>& x) {
-  return os << std::complex<RealType>(x.real(), x.imag());
+  using T = Impl::complex_ostream_t<RealType>;
+  return os << std::complex<T>(static_cast<T>(x.real()),
+                               static_cast<T>(x.imag()));
 }
 
 /// \brief Extraction operator: reads "r", "(r)" or "(r,i)" as std::complex
@@ -1459,8 +1517,11 @@ std::basic_ostream<CharT, Traits>& operator<<(
 template <class RealType, class CharT, class Traits>
 std::basic_istream<CharT, Traits>& operator>>(
     std::basic_istream<CharT, Traits>& is, complex<RealType>& x) {
-  std::complex<RealType> x_std;
-  if (is >> x_std) x = complex<RealType>(x_std.real(), x_std.imag());
+  std::complex<Impl::complex_istream_t<RealType>> x_std;
+  if (is >> x_std) {
+    x = complex<RealType>(static_cast<RealType>(x_std.real()),
+                          static_cast<RealType>(x_std.imag()));
+  }
   return is;
 }
 
