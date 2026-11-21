@@ -1658,6 +1658,96 @@ TEST(TEST_CATEGORY, complex_division_constexpr_matches_runtime) {
   EXPECT_NEAR(q.imag(), r.imag(), tol);
 }
 
+// half_t and bhalf_t promote to themselves in the scalar overloads, as
+// std::float16_t and std::bfloat16_t do, and combine with other types through
+// std::common_type: half + float is float, an integer counts as double, and
+// half_t and bhalf_t do not combine.
+template <class T, class U>
+concept has_promote_2 = requires { typename Kokkos::Impl::promote_2_t<T, U>; };
+template <class T>
+concept has_scalar_conj = requires(T x) { Kokkos::conj(x); };
+template <class T>
+concept has_scalar_proj = requires(T x) { Kokkos::proj(x); };
+
+template <class H>
+void test_half_scalar_promotion() {
+  using Kokkos::Impl::promote_2_t;
+  using Kokkos::Impl::promote_3_t;
+  using Kokkos::Impl::promote_t;
+  using CF = Kokkos::complex<float>;
+  using CD = Kokkos::complex<double>;
+  static_assert(std::is_same_v<promote_t<H>, H>);
+  static_assert(std::is_same_v<promote_2_t<H, H>, H>);
+  static_assert(std::is_same_v<promote_2_t<H, float>, float>);
+  static_assert(std::is_same_v<promote_2_t<float, H>, float>);
+  static_assert(std::is_same_v<promote_2_t<H, double>, double>);
+  static_assert(std::is_same_v<promote_2_t<H, int>, double>);
+  static_assert(std::is_same_v<promote_2_t<long, H>, double>);
+  static_assert(std::is_same_v<promote_3_t<H, H, float>, float>);
+  // Unchanged for the arithmetic types.
+  static_assert(std::is_same_v<promote_2_t<float, float>, float>);
+  static_assert(std::is_same_v<promote_2_t<float, int>, double>);
+  static_assert(std::is_same_v<promote_2_t<int, int>, double>);
+  static_assert(std::is_same_v<promote_2_t<float, long double>, long double>);
+  static_assert(!has_promote_2<CF, float>);
+  static_assert(has_scalar_conj<float> && has_scalar_proj<int>);
+
+  static_assert(std::is_same_v<decltype(Kokkos::real(H())), H>);
+  static_assert(std::is_same_v<decltype(Kokkos::imag(H())), H>);
+  static_assert(std::is_same_v<decltype(Kokkos::norm(H())), H>);
+  static_assert(std::is_same_v<decltype(Kokkos::arg(H())), H>);
+  static_assert(std::is_same_v<decltype(Kokkos::pow(CF(), H())), CF>);
+  static_assert(std::is_same_v<decltype(Kokkos::pow(H(), CF())), CF>);
+  static_assert(std::is_same_v<decltype(Kokkos::pow(CD(), H())), CD>);
+  static_assert(std::is_same_v<decltype(Kokkos::pow(CF(), CD())), CD>);
+
+  EXPECT_EQ(static_cast<float>(Kokkos::norm(H(3.f))), 9.f);
+  EXPECT_EQ(static_cast<float>(Kokkos::arg(H(2.f))), 0.f);
+  const float pi = Kokkos::numbers::pi_v<float>;
+  const float tol =
+      2 * static_cast<float>(H(Kokkos::Experimental::epsilon_v<H>));
+  EXPECT_NEAR(static_cast<float>(Kokkos::arg(H(-1.f))), pi, tol * pi);
+  EXPECT_NEAR(static_cast<float>(Kokkos::arg(H(-0.f))), pi, tol * pi);
+  const CF p = Kokkos::pow(CF(0, 1), H(2.f));
+  EXPECT_NEAR(p.real(), -1.f, 1e-6f);
+  EXPECT_NEAR(p.imag(), 0.f, 1e-6f);
+  const CF q = Kokkos::pow(H(2.f), CF(3, 0));
+  EXPECT_NEAR(q.real(), 8.f, 1e-5f);
+  EXPECT_NEAR(q.imag(), 0.f, 1e-5f);
+
+  // The same in a kernel.
+  int errors = 0;
+  Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<TEST_EXECSPACE>(0, 1),
+      KOKKOS_LAMBDA(int, int &err) {
+        if (!(static_cast<float>(Kokkos::norm(H(3.f))) == 9.f)) ++err;
+        const float a = static_cast<float>(Kokkos::arg(H(-1.f)));
+        if (!(Kokkos::fabs(a - pi) <= tol * pi)) ++err;
+        const CF r = Kokkos::pow(CF(0, 1), H(2.f));
+        if (!(Kokkos::fabs(r.real() + 1.f) <= 1e-6f &&
+              Kokkos::fabs(r.imag()) <= 1e-6f))
+          ++err;
+      },
+      errors);
+  EXPECT_EQ(errors, 0);
+}
+
+TEST(TEST_CATEGORY, complex_half_scalar_promotion) {
+  using Kokkos::Experimental::bhalf_t;
+  using Kokkos::Experimental::half_t;
+  test_half_scalar_promotion<half_t>();
+  test_half_scalar_promotion<bhalf_t>();
+#if !KOKKOS_HALF_T_IS_FLOAT
+  // complex<half_t> does not exist yet, so neither do the scalar conj and
+  // proj, which return it (rather than failing the static_assert in complex).
+  static_assert(!has_scalar_conj<half_t>);
+  static_assert(!has_scalar_proj<half_t>);
+#endif
+#if !KOKKOS_HALF_T_IS_FLOAT && !KOKKOS_BHALF_T_IS_FLOAT
+  static_assert(!has_promote_2<half_t, bhalf_t>);
+#endif
+}
+
 }  // namespace Test
 
 #ifdef KOKKOS_COMPILER_NVCC

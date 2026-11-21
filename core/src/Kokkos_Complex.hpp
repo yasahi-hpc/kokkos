@@ -254,6 +254,25 @@ KOKKOS_INLINE_FUNCTION constexpr void complex_multiply(T a, T b, T c, T d,
 
 }  // namespace Impl
 
+template <class RealType>
+class complex;
+
+namespace Impl {
+// The types complex<T> can be instantiated for.  The scalar overloads that
+// return complex<promote_t<T>> (conj, proj) are constrained on it, so that
+// they are absent, rather than a hard error, for other types.
+template <class T>
+inline constexpr bool is_complex_value_type_v =
+    std::is_floating_point_v<T> && std::is_same_v<T, std::remove_cv_t<T>>;
+template <class T, class = void>
+struct complex_promote {};
+template <class T>
+struct complex_promote<
+    T, std::enable_if_t<is_complex_value_type_v<promote_t<T>>>> {
+  using type = complex<promote_t<T>>;
+};
+}  // namespace Impl
+
 /// \class complex
 /// \brief Partial reimplementation of std::complex that works as the
 ///   result of a Kokkos::parallel_reduce.
@@ -267,8 +286,7 @@ class
     alignas(2 * sizeof(RealType))
 #endif
         complex {
-  static_assert(std::is_floating_point_v<RealType> &&
-                    std::is_same_v<RealType, std::remove_cv_t<RealType>>,
+  static_assert(Impl::is_complex_value_type_v<RealType>,
                 "Kokkos::complex can only be instantiated for a cv-unqualified "
                 "floating point type");
 
@@ -803,14 +821,14 @@ KOKKOS_INLINE_FUNCTION complex<T> pow(const complex<T>& x,
   return x == T() ? T() : exp(y * log(x));
 }
 
-template <class T, class U, class = std::enable_if_t<std::is_arithmetic_v<T>>>
+template <class T, class U, class = Impl::promote_t<T>>
 KOKKOS_INLINE_FUNCTION complex<Impl::promote_2_t<T, U>> pow(
     const T& x, const complex<U>& y) {
   using type = Impl::promote_2_t<T, U>;
   return pow(type(x), complex<type>(y));
 }
 
-template <class T, class U, class = std::enable_if_t<std::is_arithmetic_v<U>>>
+template <class T, class U, class = Impl::promote_t<U>>
 KOKKOS_INLINE_FUNCTION complex<Impl::promote_2_t<T, U>> pow(const complex<T>& x,
                                                             const U& y) {
   using type = Impl::promote_2_t<T, U>;
@@ -869,8 +887,9 @@ KOKKOS_INLINE_FUNCTION constexpr complex<RealType> conj(
 }
 
 template <class ArithmeticType>
-KOKKOS_INLINE_FUNCTION constexpr complex<Impl::promote_t<ArithmeticType>> conj(
-    ArithmeticType x) {
+KOKKOS_INLINE_FUNCTION constexpr
+    typename Impl::complex_promote<ArithmeticType>::type
+    conj(ArithmeticType x) {
   using type = Impl::promote_t<ArithmeticType>;
   return complex<type>(x, -type());
 }
@@ -917,8 +936,8 @@ KOKKOS_INLINE_FUNCTION complex<RealType> proj(const complex<RealType>& x) {
 //! Projection of a real number, as of complex(x): +inf for +-inf.
 //! Integers are promoted to double.
 template <class ArithmeticType>
-KOKKOS_INLINE_FUNCTION complex<Impl::promote_t<ArithmeticType>> proj(
-    ArithmeticType x) {
+KOKKOS_INLINE_FUNCTION typename Impl::complex_promote<ArithmeticType>::type
+proj(ArithmeticType x) {
   return proj(complex<Impl::promote_t<ArithmeticType>>(x));
 }
 

@@ -48,23 +48,28 @@ struct promote<float> {
 };
 template <class T>
 using promote_t = typename promote<T>::type;
-template <class T, class U,
-          bool = std::is_arithmetic_v<T>&& std::is_arithmetic_v<U>>
-struct promote_2 {
-  using type = decltype(promote_t<T>() + promote_t<U>());
-};
+// The promoted type of mixed arguments: integers count as double, and the
+// result is the common type of the promoted types. It is defined only if
+// every argument has a promoted type (also extended floating-point types such
+// as half_t, which specialise promote) and they have a common type (half_t
+// and bhalf_t have none, as std::float16_t and std::bfloat16_t).
+template <class T, class U, class = void>
+struct promote_2 {};
 template <class T, class U>
-struct promote_2<T, U, false> {};
+struct promote_2<T, U,
+                 std::void_t<std::common_type_t<promote_t<T>, promote_t<U>>>> {
+  using type = std::common_type_t<promote_t<T>, promote_t<U>>;
+};
 template <class T, class U>
 using promote_2_t = typename promote_2<T, U>::type;
-template <class T, class U, class V,
-          bool = std::is_arithmetic_v<T>&& std::is_arithmetic_v<U>&&
-              std::is_arithmetic_v<V>>
-struct promote_3 {
-  using type = decltype(promote_t<T>() + promote_t<U>() + promote_t<V>());
-};
+template <class T, class U, class V, class = void>
+struct promote_3 {};
 template <class T, class U, class V>
-struct promote_3<T, U, V, false> {};
+struct promote_3<
+    T, U, V,
+    std::void_t<std::common_type_t<promote_t<T>, promote_t<U>, promote_t<V>>>> {
+  using type = std::common_type_t<promote_t<T>, promote_t<U>, promote_t<V>>;
+};
 template <class T, class U, class V>
 using promote_3_t = typename promote_3<T, U, V>::type;
 }  // namespace Impl

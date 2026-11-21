@@ -554,6 +554,25 @@ KOKKOS_INLINE_FUNCTION Kokkos::Experimental::bhalf_t test_fallback_bhalf(Kokkos:
   return Impl::impl_test_fallback_bhalf(x);
 }
 
+// Scalar promotion: half_t and bhalf_t are floating-point types that promote
+// to themselves, as std::float16_t and std::bfloat16_t do (so that, e.g.,
+// norm(half_t) and arg(half_t) return half_t, and pow(complex<float>, half_t)
+// returns complex<float>).
+namespace Impl {
+#if !KOKKOS_HALF_T_IS_FLOAT
+template <>
+struct promote<Kokkos::Experimental::half_t> {
+  using type = Kokkos::Experimental::half_t;
+};
+#endif
+#if !KOKKOS_BHALF_T_IS_FLOAT
+template <>
+struct promote<Kokkos::Experimental::bhalf_t> {
+  using type = Kokkos::Experimental::bhalf_t;
+};
+#endif
+}  // namespace Impl
+
 // Complex number functions
 #define KOKKOS_IMPL_MATH_COMPLEX_REAL_HALF(FUNC, HALF_TYPE) \
   KOKKOS_INLINE_FUNCTION HALF_TYPE FUNC(HALF_TYPE x) { return x; }
