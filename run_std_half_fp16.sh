@@ -40,11 +40,13 @@
 #   CONFIGS      builds to run         (default: "default native gnu gnu-native")
 #   BUILD_TYPE   CMake build type      (default: Debug)
 #   JOBS         build parallelism     (default: number of CPUs)
-#   ENABLE_OPENMP  ON: also enable the OpenMP backend; builds and runs the OpenMP test
-#                executables too, in separate build directories build_std_half_<config>_omp
-#                (default: OFF). OMP_NUM_THREADS defaults to 8.
-#   FULL         ON: also build <backend>2 and <backend>_ViewSupport and run every test
-#                executable without a filter (default: OFF). A FULL run needs more
+#   ENABLE_OPENMP  ON: also enable the OpenMP backend; builds and runs
+#                Kokkos_CoreUnitTest_OpenMP_SmokeTest and Kokkos_CoreUnitTest_OpenMP too,
+#                in separate build directories build_std_half_<config>_omp (default:
+#                OFF). OMP_NUM_THREADS defaults to 8 unless already set.
+#   FULL         ON: also build Serial2, <backend>_ViewSupport and OpenMPInterOp, and run
+#                every test executable without a filter (default: OFF). Tests that
+#                Kokkos skips for missing features are counted, not failures. A FULL run needs more
 #                than the 1 hour of the debug queue above; runs longer than 1 hour
 #                must use the capacity queue:
 #                qsub -q capacity -l walltime=3:00:00 \
@@ -220,18 +222,32 @@ run_test() {  # run_test <config> <build dir> <executable> <filter>
   "$exe" ${4:+--gtest_filter="$4"} > "$log" 2>&1
   local rc=$?
   grep -E '^\[ *(OK|FAILED|PASSED|SKIPPED) *\]|Failure|Expected|Which is|actual' "$log" | tail -40
-  # A skipped test on the std backend means the backend was not selected.
-  local nskip
-  nskip=$(grep -cE '^\[ *SKIPPED *\] [^ ]+\.' "$log")
-  record "$name" "$( [ $rc = 0 ] && grep -m1 'PASSED' "$log" | sed 's/.*PASSED *\] *//' || echo "FAILED (exit $rc, see $log)")$([ "$nskip" -gt 0 ] && echo " ($nskip SKIPPED)")"
+  # The std-backend tests (*_vs_std*) skip only without the std backend: a skip
+  # there is a failure. Other tests skip for features this configuration lacks
+  # (death tests, graphs, shared spaces): counted, not failures.
+  local nstd nskip
+  # gtest prints a skipped test twice: as it runs ("name (N ms)") and in the final
+  # list; count the first.
+  nstd=$(grep -cE '^\[ *SKIPPED *\] [^ ]+_vs_std[^ ]* \(' "$log")
+  nskip=$(grep -E '^\[ *SKIPPED *\] [^ ]+ \(' "$log" | grep -cv '_vs_std')
+  record "$name" "$( [ $rc = 0 ] && grep -m1 'PASSED' "$log" | sed 's/.*PASSED *\] *//' || echo "FAILED (exit $rc, see $log)")$([ "$nstd" -gt 0 ] && echo " ($nstd std-backend tests SKIPPED)")$([ "$nskip" -gt 0 ] && echo " ($nskip skipped by Kokkos)")"
 }
 
-# Test executables: per backend <B>_SmokeTest and <B>1 (and with FULL=ON <B>2 and
-# <B>_ViewSupport), plus Default (the default execution space).
+# Test executables (core/unit_test/CMakeLists.txt): Serial is split into
+# Serial1/Serial2, OpenMP is one executable, Kokkos_CoreUnitTest_OpenMP. MAIN_<B> is
+# the one with the numeric traits; FULL=ON adds the rest. Plus Default (the default
+# execution space).
+MAIN_Serial=Kokkos_CoreUnitTest_Serial1
+MAIN_OpenMP=Kokkos_CoreUnitTest_OpenMP
 TESTS=""
 for b in $BACKENDS; do
-  TESTS="$TESTS Kokkos_CoreUnitTest_${b}_SmokeTest Kokkos_CoreUnitTest_${b}1"
-  [ "$FULL" = ON ] && TESTS="$TESTS Kokkos_CoreUnitTest_${b}2 Kokkos_CoreUnitTest_${b}_ViewSupport"
+  main=MAIN_$b
+  TESTS="$TESTS Kokkos_CoreUnitTest_${b}_SmokeTest ${!main}"
+  if [ "$FULL" = ON ]; then
+    TESTS="$TESTS Kokkos_CoreUnitTest_${b}_ViewSupport"
+    [ "$b" = Serial ] && TESTS="$TESTS Kokkos_CoreUnitTest_Serial2"
+    [ "$b" = OpenMP ] && TESTS="$TESTS Kokkos_CoreUnitTest_OpenMPInterOp"
+  fi
 done
 TESTS="$TESTS Kokkos_CoreUnitTest_Default"
 TARGETS="kokkoscore Kokkos_CoreTestCompileOnly$TESTS"
@@ -317,7 +333,8 @@ KOKKOS_HALF_T_IS_FLOAT KOKKOS_BHALF_T_IS_FLOAT' | "$CXX" $FLAGS -E -P -x c++ - 2
 
   for b in $BACKENDS; do
     run_test "$cfg" "$B" "Kokkos_CoreUnitTest_${b}_SmokeTest" '*complex*:*atomic*'
-    run_test "$cfg" "$B" "Kokkos_CoreUnitTest_${b}1" '*numeric_traits*'
+    main=MAIN_$b
+    run_test "$cfg" "$B" "${!main}" '*numeric_traits*'
   done
   run_test "$cfg" "$B" Kokkos_CoreUnitTest_Default '*half*'
   if [ "$FULL" = ON ]; then
