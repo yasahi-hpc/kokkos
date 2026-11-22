@@ -2267,6 +2267,12 @@ does not write it when the sentry fails, and then assign
 `__f = static_cast<_Float16>(__flt)` unconditionally: the result is an indeterminate
 value. So `half_io_vs_std` does not compare such inputs. Worth reporting to GCC.
 
+*aarch64 (added 2026-11-23):* the script detects the CPU: on aarch64 the native builds
+use `Kokkos_ARCH_ARMV9_GRACE`, the CPU check is `fphp` in `/proc/cpuinfo`, and the code
+probe counts `fmul h…` (native) and `fcvt s…, h…` (through float). On the Grace
+machine submit `run_std_half_fp16_grace.sh`, which sets that machine's PBS header and
+modules and runs `run_std_half_fp16.sh`.
+
 *Options added 2026-11-23:* `ENABLE_OPENMP=ON` also enables the OpenMP backend and
 builds and runs `Kokkos_CoreUnitTest_OpenMP_SmokeTest`/`OpenMP1` (separate build
 directories `build_std_half_<config>_omp`, `OMP_NUM_THREADS` default 8). `FULL=ON` also
@@ -2564,12 +2570,12 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | Locale branch of `half_io` | verification | any machine with `de_DE`/`fr_FR` UTF-8 locales |
 | ~~**GNU dialect** `-std=gnu++23`, Kokkos's default for GCC~~ | done 2026-11-23, job 9117216: same probe values and test results as strict `-std=c++23`, with and without native half (§8.2) | Aurora |
 | ~~**Declared but undefined cast functions** (the H18 pattern)~~ | done 2026-11-23: `half_cast_overloads`/`bhalf_cast_overloads` pass on the std backend (job 9117216, four builds) and on CUDA (job 10404595); none missing. HIP/SYCL: run the same tests there (§8.3, §8.4) | Aurora, A100; HIP/SYCL pending |
-| aarch64 with native half arithmetic (`Kokkos_ARCH_ARMV9_GRACE` or another FP16 `-mcpu`): expect method 16 and the Sapphire Rapids probe results | verification (proposed) | GCC 15 aarch64 machine: `run_std_half_gcc13.sh` with an arch option |
+| aarch64 with native half arithmetic: `Kokkos_ARCH_ARMV9_GRACE` (`-mcpu=neoverse-v2`); Grace's Neoverse V2 has the Arm FP16 extension (`fphp`/`asimdhp`), so GCC should evaluate `_Float16` in half (method 16), unlike the default target of job 4260499 (method 0). Expect the Sapphire Rapids probe results | planned 2026-11-23: `run_std_half_fp16.sh` now detects aarch64 (native build `ARMV9_GRACE`, CPU flag `fphp`, `fmul h…` vs `fcvt s…, h…`); `run_std_half_fp16_grace.sh` is the PBS wrapper for the Grace machine (`regular-g`, `cmake/3.31.1 gcc/15.2.0`). If the CPU lacks `fphp`, the native builds are built but not run, and this becomes future work | Grace machine (the only aarch64 one, GCC 15) |
 | ~~Numeric traits of `half_t`/`bhalf_t` against `std::numeric_limits<std::float16_t/bfloat16_t>`~~ | done 2026-11-23: `numeric_traits_half_vs_std_numeric_limits` passes in all four builds (job 9117303) and in `default`/`gnu-native` with OpenMP (job 9117309); all traits agree | GCC ≥ 13 |
 | ~~Stream I/O of `half_t`/`bhalf_t` against libstdc++'s `std::float16_t`/`std::bfloat16_t` extractor and inserter~~ | done 2026-11-23: `half_io_vs_std`/`bhalf_io_vs_std` pass in all four builds (job 9117303) and with OpenMP (job 9117309); Kokkos matches libstdc++ for every compared input and format. Not compared: sentry failures, where libstdc++ deviates from C++23 (§8.2) | GCC ≥ 13 |
 | Report the libstdc++ extraction deviation (sentry failure assigns an uninitialized float; GCC 14, 15, master) to GCC | optional, external | — |
 | ~~`ENABLE_OPENMP=ON` and `FULL=ON` (complete test executables)~~ | done 2026-11-23: job 9117446 (`default` and `gnu-native`, Serial + OpenMP): every core test executable builds with 0 warnings and passes, including `Kokkos_CoreUnitTest_OpenMP` (333) and `OpenMPInterOp` (§8.2) | Aurora, `capacity` queue |
-| GCC 13 (only 14.2 and 15.2 tested) | verification (proposed) | wherever a GCC 13 module exists |
+| GCC 13 (only 14.2 and 15.2 tested) | **future work** (decided 2026-11-23): no machine with GCC 13 is available | a machine with GCC 13 |
 | Optional: complex functions vs `std::complex<std::float16_t>` over the `ch3acc` inputs (expected equal up to the last bit) | measurement (proposed) | GCC ≥ 13, both evaluation methods |
 | A8 (D11), half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and a build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF` | after A8 | GCC ≥ 13 |
 | Pre-Ampere bf16 double rounding at run time (B4 notes) | known gap, unfixed | none of the available machines: needs an NVIDIA GPU older than sm_80 |

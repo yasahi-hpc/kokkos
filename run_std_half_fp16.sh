@@ -14,7 +14,8 @@
 # and runs the complex/half tests twice, in separate build directories:
 #   default  no Kokkos_ARCH_*: x86-64 baseline. GCC evaluates _Float16 in float
 #            (__FLT_EVAL_METHOD_TS_18661_3__ = 0), as in job 4260499 on aarch64.
-#   native   Kokkos_ARCH_SPR (-march=sapphirerapids): AVX512-FP16. GCC evaluates
+#   native   Kokkos_ARCH_SPR (-march=sapphirerapids, AVX512-FP16) on x86-64, or
+#            Kokkos_ARCH_ARMV9_GRACE (-mcpu=neoverse-v2, Arm FP16) on aarch64. GCC evaluates
 #            _Float16 in half (method 16), so the scalar half_t operators and
 #            libstdc++'s std::complex<std::float16_t> multiplication change; Kokkos's
 #            complex<half_t> * and / should not (CH3 computes in float).
@@ -36,7 +37,8 @@
 #   BUILD_ROOT   parent of the builds  (default: $KOKKOS_SRC)
 #   CXX          C++ compiler, GCC only (default: the first GCC >= 13 of g++-14, g++-13,
 #                g++; a non-GCC CXX from the environment, e.g. oneAPI's icpx, is ignored)
-#   ARCH         Kokkos_ARCH_<ARCH> of the native build (default: SPR)
+#   ARCH         Kokkos_ARCH_<ARCH> of the native build (default: SPR on x86-64,
+#                ARMV9_GRACE on aarch64)
 #   CONFIGS      builds to run         (default: "default native gnu gnu-native")
 #   BUILD_TYPE   CMake build type      (default: Debug)
 #   JOBS         build parallelism     (default: number of CPUs)
@@ -62,7 +64,23 @@ set -uo pipefail
 
 KOKKOS_SRC=${KOKKOS_SRC:-$PWD}
 BUILD_ROOT=${BUILD_ROOT:-$KOKKOS_SRC}
-ARCH=${ARCH:-SPR}
+# CPU-specific settings: the native build's Kokkos_ARCH, the /proc/cpuinfo flag of
+# native half arithmetic, and the instructions of a half multiplication, native or
+# through float.
+case $(uname -m) in
+  aarch64)
+    ARCH=${ARCH:-ARMV9_GRACE}
+    CPU_FP16_FLAG=fphp
+    NATIVE_MUL_RE='fmul[[:space:]]+h[0-9]+'
+    FLOAT_MUL_RE='fcvt[[:space:]]+s[0-9]+, *h[0-9]+|__extendhfsf2'
+    ;;
+  *)
+    ARCH=${ARCH:-SPR}
+    CPU_FP16_FLAG=avx512_fp16
+    NATIVE_MUL_RE='vmulsh'
+    FLOAT_MUL_RE='vcvtph2ps|vcvtsh2ss|__extendhfsf2'
+    ;;
+esac
 CONFIGS=${CONFIGS:-default native gnu gnu-native}
 BUILD_TYPE=${BUILD_TYPE:-Debug}
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 8)}
@@ -123,14 +141,14 @@ echo | "$CXX" -std=c++23 -dM -E -x c++ - | grep -q '__STDCPP_FLOAT16_T__' ||
 
 # Whether this CPU can run AVX512-FP16 code; without it the native build is built and
 # probed, but not run (it would die with SIGILL).
-if grep -qw avx512_fp16 /proc/cpuinfo 2>/dev/null; then CPU_FP16=yes; else CPU_FP16=no; fi
+if grep -qw "$CPU_FP16_FLAG" /proc/cpuinfo 2>/dev/null; then CPU_FP16=yes; else CPU_FP16=no; fi
 
 echo "===== Environment"
 echo "date:     $(date -Is)"
 echo "job:      $JOBID"
 echo "host:     $(hostname) ($(uname -m))"
-echo "cpu:      $(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//')"
-echo "fp16 cpu: $CPU_FP16 (avx512_fp16 in /proc/cpuinfo)"
+echo "cpu:      $(lscpu 2>/dev/null | grep -m1 -E '^Model name' | cut -d: -f2- | sed 's/^ *//')"
+echo "fp16 cpu: $CPU_FP16 ($CPU_FP16_FLAG in /proc/cpuinfo)"
 echo "source:   $KOKKOS_SRC"
 (cd "$KOKKOS_SRC" && echo "commit:   $(git rev-parse --short HEAD 2>/dev/null) on $(git branch --show-current 2>/dev/null)" &&
   git status --short --untracked-files=no 2>/dev/null | sed 's/^/          modified: /')
@@ -214,7 +232,7 @@ run_test() {  # run_test <config> <build dir> <executable> <filter>
     return
   fi
   if [ "$cfg" = native ] && [ "$CPU_FP16" != yes ]; then
-    record "$name" "NOT RUN (CPU lacks avx512_fp16)"
+    record "$name" "NOT RUN (CPU lacks $CPU_FP16_FLAG)"
     return
   fi
   echo "===== [$cfg] Run $3 $4"
@@ -304,7 +322,7 @@ for cfg in $CONFIGS; do
   echo "  dialect: $(echo "$FLAGS" | grep -oE -- '-std=[a-z+0-9]+' | sort -u | tr '\n' ' ')"
   # shellcheck disable=SC2086
   (cd "$B" && echo | "$CXX" $FLAGS -dM -E -x c++ - 2>&1 |
-    grep -E '__FLT_EVAL_METHOD(_TS_18661_3)?__ |__AVX512FP16__ |__STDCPP_B?FLOAT16_T__ |__STRICT_ANSI__ ' |
+    grep -E '__FLT_EVAL_METHOD(_TS_18661_3)?__ |__AVX512FP16__ |__ARM_FEATURE_FP16_SCALAR_ARITHMETIC |__STDCPP_B?FLOAT16_T__ |__STRICT_ANSI__ ' |
     sed 's/^#define /  /')
   # shellcheck disable=SC2086
   (cd "$B" && echo '#include <Kokkos_Macros.hpp>
@@ -312,7 +330,7 @@ KOKKOS_HALF_T_IS_FLOAT KOKKOS_BHALF_T_IS_FLOAT' | "$CXX" $FLAGS -E -P -x c++ - 2
     sed 's/^/  HALF_T_IS_FLOAT, BHALF_T_IS_FLOAT: /')
   # shellcheck disable=SC2086
   if (cd "$B" && "$CXX" $FLAGS -O2 -S -o "$LOG_DIR/${cfg}_fp16_mul.s" "$ASM_SRC") > "$LOG_DIR/${cfg}_fp16_mul.log" 2>&1; then
-    echo "  half multiplication instructions (-O2): native half vmulsh: $(grep -c 'vmulsh' "$LOG_DIR/${cfg}_fp16_mul.s"), through float (vcvtph2ps/vcvtsh2ss + mulss): $(grep -cE 'vcvtph2ps|vcvtsh2ss|__extendhfsf2' "$LOG_DIR/${cfg}_fp16_mul.s")"
+    echo "  half multiplication instructions (-O2): native half ($NATIVE_MUL_RE): $(grep -cE "$NATIVE_MUL_RE" "$LOG_DIR/${cfg}_fp16_mul.s"), through float ($FLOAT_MUL_RE): $(grep -cE "$FLOAT_MUL_RE" "$LOG_DIR/${cfg}_fp16_mul.s")"
     record "$cfg: codegen probe" ok
   else
     record "$cfg: codegen probe" "FAILED (see $LOG_DIR/${cfg}_fp16_mul.log)"
@@ -320,7 +338,7 @@ KOKKOS_HALF_T_IS_FLOAT KOKKOS_BHALF_T_IS_FLOAT' | "$CXX" $FLAGS -E -P -x c++ - 2
   # shellcheck disable=SC2086
   if (cd "$B" && "$CXX" $FLAGS -o "$LOG_DIR/${cfg}_fp16_probe" "$PROBE_SRC" core/src/libkokkoscore*.a -ldl -lpthread) > "$LOG_DIR/${cfg}_fp16_probe.log" 2>&1; then
     if [ "$cfg" = native ] && [ "$CPU_FP16" != yes ]; then
-      record "$cfg: runtime probe" "NOT RUN (CPU lacks avx512_fp16)"
+      record "$cfg: runtime probe" "NOT RUN (CPU lacks $CPU_FP16_FLAG)"
     else
       "$LOG_DIR/${cfg}_fp16_probe" | sed 's/^PROBE /  /'
       prc=${PIPESTATUS[0]}
