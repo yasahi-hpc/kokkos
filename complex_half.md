@@ -69,7 +69,7 @@ does X", check it on a GCC 13+ machine before relying on it.
 | C12 | `:588-607` | mixed `pow` gated by `std::is_arithmetic_v` / `Impl::promote_2_t` | excludes half | gap |
 | C13 | `:556-561` | `polar(r, theta)` with `KOKKOS_EXPECTS(r >= 0)` | std: UB for negative/NaN `r`; fine | — |
 | C14 | `:483-490`, `:165-172`, `:182-206`, `:810-836` | multiply/divide computed in `RealType` | for half, products overflow at 65504 and lose ~3 bits; see D5 | align/accuracy |
-| C15 | `:61-85`, `:105-113` | interop with `std::complex<RealType>` only | for half this is `std::complex<half_t>` (a wrapper class): formally unspecified, works with libstdc++ (verified on CUDA, `half-complex.md` §3.2). Does **not** interoperate with `std::complex<std::float16_t>` | align |
+| C15 | `:61-85`, `:105-113` | interop with `std::complex<RealType>` only (D11, 2026-11-22: all of it except the converting ctor is to be deprecated, A8) | for half this is `std::complex<half_t>` (a wrapper class): formally unspecified, works with libstdc++ (verified on CUDA, `half-complex.md` §3.2, and with GCC 15 where `half_t` wraps `std::float16_t`, job 4260499). Does **not** interoperate with `std::complex<std::float16_t>` | align |
 | C16 | `:847-860` | `<<`/`>>` go through `std::complex<RealType>`; `>>` assigns even on failure (comment `:858` says otherwise) | needs `std::complex<half_t>` (see C15); assign-on-failure is a **bug** | bug + align |
 | C17 | `:862-866` | `reduction_identity<complex<T>>` returns `0`/`1` (int) | works for half via `half_t(int)` | — |
 | C18 | `:31-33` | `alignas(2*sizeof(RealType))` under `KOKKOS_ENABLE_COMPLEX_ALIGN` | `complex<half_t>`: align 4 vs `std::complex<std::float16_t>`: 2. Same kind of difference already exists for float/double; keep | — |
@@ -146,7 +146,7 @@ It is a fork of libc++'s `<complex>`, made host/device. Features:
 | Scalar overloads | `real imag arg norm conj proj` for integers (→ `double`) and FP types, through `__libcpp_complex_overload_traits`. 2.5 specialises it for `__half` (`<__half,false,false>`) so that scalar `conj`/`norm`/`real`/`imag` work; it also adds `arg(__half)` | `real imag conj norm` only (C10, C11) | **confirms D8/B3**: specialising the promotion trait for half is the approach libcu++ takes |
 | Mixed `pow` | `pow(complex<T>, U)` etc. return `complex<__promote_t<T,U>>`, gated by `__is_complex_arithmetic` (which includes half) | gated by `is_arithmetic` (C12) | **confirms** the CH1 gate change |
 | Converting ctor | 2.5: implicit iff `T{declval<U>()}` is non-narrowing list-init. (main): `__is_non_narrowing_convertible<T,U>`, **specialised as true for `__half`↔`float`/`double` in both directions** (a workaround for `__CUDA_NO_HALF_CONVERSIONS__`), so `complex<__half>` ← `complex<float>` is **implicit** | always implicit | see the D4 note: libcu++ does *not* follow P1467 for half; brace-init detection cannot work for class-type halves |
-| `std::complex` interop | ctor/assignment from `::std::complex<U>` for **any** `U`, by `reinterpret_cast` of `U[2]`, host+device; conversion to `::std::complex<T>` host-only | only `std::complex<RealType>` | possible simplification of CH4 (see CH4) |
+| `std::complex` interop | ctor/assignment from `::std::complex<U>` for **any** `U`, by `reinterpret_cast` of `U[2]`, host+device; conversion to `::std::complex<T>` host-only | only `std::complex<RealType>` | possible simplification of CH4 (see CH4); under D11 only libcu++'s constructor is a model, not its conversion to `std::complex` |
 | Stream I/O | delegates to `std::complex<T>` (`complex<__half>`: through `std::complex<float>`). `>>` assigns the temporary **even on failure**: the same defect as Kokkos C16, still present in (main) | delegates to `std::complex<RealType>` too (A2), but assigns only on success (A1.4); for half through standard proxy types (CH1) | the same delegation design; Kokkos fixes the assignment defect |
 | `complex<__half>` layout | explicit specialisation storing a `__half2`, `alignas(alignof(__half2)) = 4`; `+= -=` via `__hadd2/__hsub2`, `==` via `__hbeq2`. In 2.5, `*` and `/` take their partial products from `__half2` vector multiplies (`__type_to_vector<__half> = __half2`), i.e. the arithmetic is **in half precision, not promoted** | two `half_t` members, `alignas(4)` only with `KOKKOS_ENABLE_COMPLEX_ALIGN` (C18) | optional CH6 (performance), behind a benchmark |
 | Half transcendentals | 2.5: `asinh`, `acosh`, `atanh`, `acos` for `complex<__half>` computed through `complex<float>`; everything else in half. (main): the specialisations are not in `nvfp16.h` (where they live now was not checked) | — | **supports D5**: libcu++ needed float for at least these four |
@@ -188,7 +188,10 @@ inline constexpr bool is_complex_value_type_v =
 and mixed `pow` (C12). This needs `#include <Kokkos_Half.hpp>` in
 `Kokkos_Complex.hpp`, which also fixes C2.
 
-**D2: `std::complex` interop target.** Keep the existing interop with
+**D2: `std::complex` interop target. — SUPERSEDED by D11 (2026-11-22).** *The rest of
+D2 (keep everything; add an explicit conversion operator to
+`std::complex<std::float16_t>`) no longer applies: the only interop kept is the
+converting constructor, and CH4 shrinks to a constructor.* Original text: Keep the existing interop with
 `std::complex<RealType>` for all types. For half it is `std::complex<half_t>`: it works
 with libstdc++, and removing it would break code. Additionally, when
 `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` / `..._BHALF_...` is defined (host-only
@@ -196,6 +199,26 @@ C++23 builds), add **explicit** conversions to/from `std::complex<half_t::impl_t
 (= `std::complex<std::float16_t>`). That is the standard-conforming type, and the closest
 match to the goal. Do not add it for CUDA/HIP/SYCL `impl_type`s (`std::complex<__half>`
 is meaningless).
+
+**D11: `std::complex` interop: keep only the converting constructor (decided
+2026-11-22).** Deprecate every other interop between `Kokkos::complex` and
+`std::complex` in Kokkos 5 (`KOKKOS_ENABLE_DEPRECATED_CODE_5`), and remove it in
+Kokkos 6. Kept: `complex(const std::complex<RealType>&)`, i.e. `std::complex` →
+`Kokkos::complex`. Reasons:
+- `std::complex` is not device-callable, so all the other interop is host-only, in a
+  type meant for device code (each overload has a "cannot be called in a CUDA device
+  function" comment);
+- the overloads are an asymmetric, accidental set: `std * Kokkos` exists, `Kokkos *
+  std` and `+ - /` do not; `==`/`!=` exist both ways; `exp` alone of all functions
+  takes a `std::complex` (with the naive formula, not A6's special values);
+- the implicit `operator std::complex<RealType>()` (marked "TODO: make explicit" since
+  2019) creates `std::complex<half_t>` for half (unspecified, C15), and makes mixed
+  expressions ambiguous;
+- the converting constructor alone covers the common uses: it is implicit, and every
+  member operator taking `const complex<RealType>&` (`= += -= *= /=`) and every
+  non-template parameter accept a `std::complex<RealType>` through it.
+Implementation step: A8. Interop with `std::complex<std::float16_t>` (CH4) follows the
+same policy: a converting constructor only.
 
 **D3: mixed precision stays a Kokkos extension.** `std::complex` forbids
 `complex<float16_t> + double`. Kokkos allows it, returning `complex<common_type_t>`.
@@ -549,6 +572,7 @@ both:
 A1 ─ A2 ─ A3 ─ A4 ──┐
                     ├─ CH1 ─ CH2 ─ CH3 ─ (CH4: future) ─ (CH5: future, with B4) ─ (CH6: no gain, not done)
 B1 ─ B2 ─ B3 ─ B4 ──┘
+A8 (D11, deprecation of the std::complex interop) is independent of B and C.
 A5, A6 (from §3b) are independent of B and C. A5 should precede CH3, whose half `*`
 reuses Impl::complex_multiply. A6 can come later.
 ```
@@ -1234,6 +1258,102 @@ implicit for `complex<float>` ← `complex<double>` while `std` is explicit. Cha
 breaks users and needs a deprecation cycle. Record it as a known divergence; the
 half-specific part is CH2.
 
+**A8. Deprecate the `std::complex` interop except the converting constructor (D11;
+planned 2026-11-22).** Independent of Parts B and C; tested with float/double.
+
+*Inventory* (`core/src/Kokkos_Complex.hpp` at `a6ad59faa`; the only other user in the
+repository is `core/unit_test/TestComplex.hpp`):
+
+| # | Interop | Line | Today | After removal | A8 |
+|---|---|---|---|---|---|
+| I0 | `complex(const std::complex<RealType>&)` (implicit, host+device) | `:426` | — | — | **keep** |
+| I1 | `operator std::complex<RealType>() const` (implicit, host) | `:442` | `SD s = kz;`, `sd = kz;`, `SD s(kz);` | all three break | deprecate |
+| I2 | `operator=(const std::complex<RealType>&)` (host) | `:481` | `kz = sd;`, and mixed `kz = sf;` | same type still compiles (I0 + copy assignment); **mixed breaks** (two user-defined conversions) | replace by a deprecated template for the mixed case only |
+| I3 | `operator/=(const std::complex<RealType>&)` (host, `constexpr`) | `:561` | `kz /= sd;`, mixed `kz /= sf;` | same type still compiles (I0 + member `/=`); **mixed breaks** | same as I2 |
+| I4 | `operator==(std::complex<R1>, complex<R2>)` and reverse | `:659`, `:668` | `sd == kz`, `kz == sd` | break | deprecate |
+| I5 | `operator!=(std::complex<R1>, complex<R2>)` and reverse | `:710`, `:719` | `kz != sd` | break | deprecate |
+| I6 | `operator*(std::complex<R1>, complex<R2>)` (host, `constexpr`) | `:844` | `sd * kz` | breaks (no reverse overload exists either) | deprecate |
+| I7 | `exp(const std::complex<RealType>&)` → `Kokkos::complex` | `:1616` | `Kokkos::exp(sd)` | breaks | deprecate |
+
+Not interop, unchanged: stream I/O builds `std::complex` objects internally (A2), and
+the tests use `std::complex` as a reference.
+
+*Measured* (GCC 12, C++20, `-fsyntax-only` against the real header; probe
+`tmp/claude_builds/complex_a6/a8probe.cpp`, one case per `-DCASE=n`; "removed" = I1–I7
+deleted, "A8" = the design below, both as edited copies of the header):
+
+| Expression (`KD = Kokkos::complex<double>`, `sd`/`sf` = `std::complex<double/float>`) | today | removed | A8 |
+|---|---|---|---|
+| `KD a = sd;`, `take(sd)` with `take(KD)`, `KD a(sf);` (I0) | ok | ok | ok, no warning |
+| `kz = sd;`, `kz /= sd;`, `kz += sd; kz *= sd;` | ok | ok | ok, no warning |
+| `kz = sf;`, `kz /= sf;` | ok | error | ok, 1 deprecation warning |
+| `sd == kz`, `kz == sd`, `kz != sd`, `sd * kz`, `Kokkos::exp(sd)` | ok | error | ok, 1 warning |
+| `SD s = kz;`, `sd = kz;`, `SD s(kz);` | ok | error | ok, 1 warning |
+| `kz * sd`, `kz + sd` | error | error | error (unchanged) |
+| `kz = {3.0, 4.0};`, `kz /= {3.0, 4.0};` | **error (ambiguous with I2/I3)** | ok | ok |
+
+So A8 warns exactly where the Kokkos 6 removal will break code, never where code keeps
+compiling, and as a side effect fixes the braced assignment.
+
+*Design:*
+- I1, I4, I5, I6, I7: wrap in `#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5` and mark
+  `KOKKOS_DEPRECATED_WITH_COMMENT(...)` (warns only with
+  `Kokkos_ENABLE_DEPRECATION_WARNINGS`, ON by default). Messages give the replacement:
+  - I1: "Use std::complex<T>(z.real(), z.imag()) instead.";
+  - I4/I5: "Convert the std::complex operand to Kokkos::complex.";
+  - I6: "Use Kokkos::complex(x) * y instead.";
+  - I7: "Use Kokkos::exp(Kokkos::complex(z)) or std::exp(z) instead."
+- I2, I3: remove the non-template overloads unconditionally (I0 takes over the same-type
+  case, with identical results). Under `KOKKOS_ENABLE_DEPRECATED_CODE_5` add deprecated
+  templates for the mixed case:
+  ```cpp
+  template <class U>
+    requires(!std::is_same_v<U, RealType> &&
+             std::is_convertible_v<const std::complex<U>&, std::complex<RealType>>)
+  KOKKOS_DEPRECATED_WITH_COMMENT("Convert to Kokkos::complex<RealType> first.")
+  complex& operator=(const std::complex<U>& src) noexcept;   // and operator/=
+  ```
+  The constraint accepts exactly what the old overload accepted through
+  `std::complex`'s implicit widening (`std::complex<float>` → `<double>`).
+- I0 stays as is (implicit, `KOKKOS_INLINE_FUNCTION`, `reinterpret_cast` reading).
+  Whether it should become `explicit(...)` by the D4 rule is a separate decision
+  (Part A note on C6).
+- CHANGELOG: under "Deprecations", one entry listing I1–I7 and the replacements.
+
+*Tests* (`TestComplex.hpp`; the prototype gives warnings at exactly these lines):
+- `:83-88` (`std::complex<RealType> sa(a)`, `r = a`, `r = sb * a`: I1, I6): rewrite
+  without interop, and move one use of each into a deprecated-code test (below);
+- `:522` (`CHECK_COMPLEX_NEAR` converts its `ref` to `std::complex<double>`: I1 when
+  `ref` is a `Kokkos::complex`): convert explicitly from the parts;
+- `:559` (`Kokkos::exp(a)` with a `std::complex<double>`: I7): use
+  `Kokkos::exp(Kokkos::complex<double>(a))`;
+- `:999` and `:1983` (`std::complex * Kokkos::complex`: I6): move into the
+  deprecated-code test;
+- `:784-792` (`complex_divide_assign_std_complex`): keep. It now tests the same-type
+  path through I0, without a warning; add the mixed case to the deprecated-code test;
+- new `complex_std_interop_converting_ctor` (always compiled): I0 in copy-init,
+  direct-init, call arguments, `= += -= *= /=` with `std::complex<RealType>`, and the
+  braced assignment; float and double only (no new `std::complex<half_t>` tests: it is
+  unspecified, and CH4 is the half route);
+- new `complex_std_interop_deprecated` under `#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5`,
+  between `KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_PUSH()`/`POP()`: one check per
+  I1–I7, including the mixed I2/I3 templates. The I1 and I6 checks moved from
+  `complex_construction:79-99` keep `half_t`/`bhalf_t` (under
+  `KOKKOS_HAS_NATIVE_HALF_TYPE`/`..._BHALF_...`, as today), so the deprecated paths keep
+  working for half until Kokkos 6.
+
+*Verification:*
+- A100 (`build_gpu`, deprecated code ON): `*complex*` on Serial and Cuda; the Complex
+  objects build without deprecation warnings (the tests push/pop them), nvcc included;
+- host build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF`: the tests compile, i.e.
+  nothing outside the deprecated-code test needs I1–I7 (the Kokkos 6 state);
+- a compile-only check that each deprecated use warns (the probe above with
+  `-Werror=deprecated-declarations`, expecting failure).
+
+*Risk:* downstream users (Kokkos Kernels, Trilinos) may rely on I1 to pass
+`Kokkos::complex` to host APIs taking `std::complex`. Not checkable here; the
+deprecation cycle is what gives them notice.
+
 ### Part B: align `half_t` with `std::float16_t` (`core/src/impl/Kokkos_Half_*.hpp`)
 
 **B1. Numeric traits bug (H12).** `Kokkos_Half_NumericTraits.hpp:324-333`:
@@ -1846,9 +1966,13 @@ GCC ≥ 13 CI job.* Under
 `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT`:
 
 ```cpp
-explicit complex(const std::complex<typename RealType::impl_type>&) noexcept;   // host
-explicit operator std::complex<typename RealType::impl_type>() const noexcept;
+complex(const std::complex<typename RealType::impl_type>&) noexcept;   // host
 ```
+
+*Revised 2026-11-22 (D11):* only the constructor. The conversion operator to
+`std::complex<std::float16_t>` that D2 proposed is dropped, since A8 deprecates the
+existing conversion operator. `std::complex<std::float16_t>` → `complex<half_t>` is not
+narrowing, so the constructor can be implicit like I0.
 
 Constrained with `requires Impl::is_half_v<RealType> && std::is_floating_point_v<typename RealType::impl_type>`.
 Tests are host-only, need GCC ≥ 13, and are not possible on this system.
@@ -1935,10 +2059,11 @@ Findings from the benchmark setup, reconciled with the source:
 | `explicit` narrowing conversions like std | partly | CH2: only into half types; float/double unchanged for compatibility (Part A note) |
 | Rejecting `complex<half_t>(1.5, 2.5)` like std | **no (deliberately)** | H1, Part B note: would break existing `half_t` users |
 | Mixed-type complex arithmetic like std (forbidden) | **no (deliberately)** | D3 |
-| Interop with `std::complex<std::float16_t>` | host C++23 only | CH4 |
+| Interop with `std::complex<std::float16_t>` | host C++23 only; constructor only (D11) | CH4 |
+| `std::complex` interop beyond the converting constructor | **no (deliberately), deprecated** | D11, A8: deprecated in Kokkos 5, removed in Kokkos 6 |
 | Annex G special values like libstdc++/libc++/libcu++ (§3b) | yes | `/` done (A1); `*` in A5; elementary functions in A6 |
 | `constexpr` division like libcu++ | yes | A3b: a constant-evaluation branch with `constexpr` helpers |
-| `std::complex<half_t>` portability (non-libstdc++) | unknown | formally unspecified. A2 plus the CH1 proxy remove the I/O use; the `std::complex<RealType>` conversions remain (C15, CH4) |
+| `std::complex<half_t>` portability (non-libstdc++) | unknown; not pursued | formally unspecified. Works with libstdc++ (CUDA; GCC 15 std backend, job 4260499). A2 plus the CH1 proxy remove the I/O use; A8 deprecates everything except the converting ctor, which is kept but not newly tested for half; the standard route for half is CH4 (`std::complex<std::float16_t>`) (C15, D11) |
 
 ## 7. Verification
 
@@ -2075,10 +2200,18 @@ passed there):
   - **B1/H16:** the trait values must hold for `std::float16_t`/`std::bfloat16_t` too.
     The `static_assert`s compare against the exact IEEE values, and `std::numeric_limits`
     of the std types can be used as an independent reference.
-- **`std::complex<half_t>` interop** (half-complex.md §3.2, the conversion ctor and
-  `operator std::complex<RealType>()`). There `std::complex<half_t>` is
-  `std::complex<floating_point_wrapper<std::float16_t>>`: unspecified, and never compiled
-  with libstdc++ 13+.
+- ~~**`std::complex<half_t>` interop**~~ (half-complex.md §3.2). *Done 2026-11-22, job
+  4260499 (GCC 15.2 libstdc++).* There `std::complex<half_t>` is
+  `std::complex<floating_point_wrapper<std::float16_t>>`, unspecified but handled by
+  libstdc++'s generic template. `complex_construction` for `half_t`/`bhalf_t`
+  (`TestComplex.hpp:79-99`) passed. It covers the conversion to `std::complex` (I1:
+  `std::complex<half_t> sa(a)`, `r = a`), `std::complex * Kokkos::complex` (I6:
+  `r = sb * a`) and `std::complex<half_t>`'s own assignment; not the converting ctor
+  from `std::complex<half_t>` (I0), which no half test uses. GCC 13 and 14 were not
+  run (the generic template is long-standing code; low risk). No further work: A8
+  deprecates I1 and I6, keeps their half coverage in its deprecated-code test, and
+  does not add tests constructing from `std::complex<half_t>`; for half on C++23 the
+  standard route is CH4.
 - **D5 to-do (mostly answered; see "CH3 vs. C++23 and libstdc++"):** from source,
   libstdc++ computes all functions in float, and `/` in float. `*` follows the
   compiler's `_Float16` evaluation method: float on x86 without AVX512-FP16, half with
@@ -2088,7 +2221,7 @@ passed there):
 
 *Future tasks that become testable here:*
 - **B4a:** `constexpr` std backend; native conversions, so no software path.
-- **CH4:** interop with `std::complex<std::float16_t>`.
+- **CH4:** converting constructor from `std::complex<std::float16_t>` (D11).
 - **CH5** (std part): enable the half `static_assert`s in `TestComplex.hpp` under
   `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT`.
 
@@ -2146,12 +2279,12 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | Task | Kind | Where it can be tested |
 |---|---|---|
 | ~~Validation of A1-A7, B1-B3, CH1-CH3, H17 with the std half backend~~ | done 2026-11-22, job 4260499: 25 + 14 + 8 tests pass, 0 warnings (GCC 15, aarch64; Serial only) | GCC ≥ 13, C++23 (§8.2) |
-| `std::complex<half_t>` interop with libstdc++ ≥ 13 (half-complex.md §3.2) | verification | GCC ≥ 13 |
+| ~~`std::complex<half_t>` interop with libstdc++ ≥ 13 (half-complex.md §3.2)~~ | done 2026-11-22, job 4260499 (GCC 15; 13/14 not run); no further work (§8.2, A8) | GCC ≥ 13 |
 | D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision | measurement (source analysis done: float, except `*` on FP16-native CPUs; aarch64 default options: float, job 4260499); left: compare with Kokkos on `ch3acc` inputs, FP16-enabling `-mcpu` | GCC ≥ 13 |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
 | B4a: `constexpr` half, std backend | future work | GCC ≥ 13 |
-| CH4: interop with `std::complex<std::float16_t>` | future work | GCC ≥ 13 |
+| CH4: converting constructor from `std::complex<std::float16_t>` (D11) | future work | GCC ≥ 13 |
 | CH5: `constexpr complex<half_t>`, std part | future work (after B4a) | GCC ≥ 13 |
 | B4b-HIP (and CH5 on HIP) | future work, needs a workaround | AMD GPU |
 | B4b-SYCL (and CH5 on SYCL) | future work | Intel GPU (compile-time checks also here) |
@@ -2159,6 +2292,8 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | Pre-Ampere bf16 double rounding at run time (B4 notes) | known gap, unfixed | none of the available machines: needs an NVIDIA GPU older than sm_80 |
 
 Still open but testable **on this machine** (no other machine needed):
+- **A8** (D11): deprecation of the `std::complex` interop except the converting
+  constructor; planned 2026-11-22, not started.
 - ~~B1/H16 runtime tests in `Kokkos_CoreUnitTest_{Serial,Cuda}1`~~: done 2026-11-22, job
   10397183, all 14 `*numeric_traits*` tests pass on Serial and Cuda.
 - **H17:** fixed on CUDA (see CH1 notes).
