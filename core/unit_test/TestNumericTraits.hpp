@@ -28,6 +28,11 @@ import kokkos.core;
 #endif
 #include <type_traits>
 #include <limits>
+#include <cstdint>
+#if defined(KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT) || \
+    defined(KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT)
+#include <stdfloat>
+#endif
 
 struct extrema {
 #define DEFINE_EXTREMA(T, m, M)                 \
@@ -465,6 +470,73 @@ constexpr T legacy_std_numeric_limits_infinity() {
 
 TEST(TEST_CATEGORY, numeric_traits_sfinae_friendly) {
   ASSERT_EQ(legacy_std_numeric_limits_infinity<int>(), 0);
+}
+
+// On the std backend half_t and bhalf_t wrap std::float16_t and
+// std::bfloat16_t, so std::numeric_limits of those types is an independent
+// reference for every half trait: the values bit for bit, the NaNs by kind
+// (the payload is unspecified), and the integer traits.
+#if defined(KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT) || \
+    defined(KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT)
+template <class H, class F>
+void test_half_traits_vs_numeric_limits() {
+  using L = std::numeric_limits<F>;
+  static_assert(sizeof(H) == 2 && sizeof(F) == 2);
+  auto bits = [](auto x) { return Kokkos::bit_cast<std::uint16_t>(x); };
+  // Direct initialization: the traits are bit patterns
+  // (BitComparisonWrapper) for half types.
+  EXPECT_EQ(bits(H(Kokkos::infinity<H>::value)), bits(L::infinity()));
+  EXPECT_EQ(bits(H(Kokkos::epsilon<H>::value)), bits(L::epsilon()));
+  EXPECT_EQ(bits(H(Kokkos::round_error<H>::value)), bits(L::round_error()));
+  EXPECT_EQ(bits(H(Kokkos::finite_min<H>::value)), bits(L::lowest()));
+  EXPECT_EQ(bits(H(Kokkos::finite_max<H>::value)), bits(L::max()));
+  EXPECT_EQ(bits(H(Kokkos::norm_min<H>::value)), bits(L::min()));
+  EXPECT_EQ(bits(H(Kokkos::denorm_min<H>::value)), bits(L::denorm_min()));
+
+  // NaNs: all exponent bits set, a nonzero fraction, and the quiet bit (the
+  // most significant fraction bit) set for quiet_NaN, clear for
+  // signaling_NaN.
+  const std::uint16_t fraction = (std::uint16_t(1) << (L::digits - 1)) - 1;
+  const std::uint16_t exponent = 0x7fff & ~fraction;
+  const std::uint16_t quiet    = std::uint16_t(1) << (L::digits - 2);
+  auto kind                    = [&](std::uint16_t b) {
+    if ((b & exponent) != exponent || (b & fraction) == 0) return 0;  // no NaN
+    return (b & quiet) ? 1 : 2;  // 1: quiet, 2: signaling
+  };
+  const std::uint16_t kq = bits(H(Kokkos::quiet_NaN<H>::value));
+  const std::uint16_t sq = bits(L::quiet_NaN());
+  const std::uint16_t ks = bits(H(Kokkos::signaling_NaN<H>::value));
+  const std::uint16_t ss = bits(L::signaling_NaN());
+  EXPECT_EQ(kind(kq), 1) << std::hex << kq;
+  EXPECT_EQ(kind(sq), 1) << std::hex << sq;
+  EXPECT_EQ(kind(ks), 2) << std::hex << ks;
+  EXPECT_EQ(kind(ss), 2) << std::hex << ss;
+
+  EXPECT_EQ(Kokkos::digits<H>::value, L::digits);
+  EXPECT_EQ(Kokkos::digits10<H>::value, L::digits10);
+  EXPECT_EQ(Kokkos::max_digits10<H>::value, L::max_digits10);
+  EXPECT_EQ(Kokkos::radix<H>::value, L::radix);
+  EXPECT_EQ(Kokkos::min_exponent<H>::value, L::min_exponent);
+  EXPECT_EQ(Kokkos::max_exponent<H>::value, L::max_exponent);
+  EXPECT_EQ(Kokkos::min_exponent10<H>::value, L::min_exponent10);
+  EXPECT_EQ(Kokkos::max_exponent10<H>::value, L::max_exponent10);
+}
+#endif
+
+TEST(TEST_CATEGORY, numeric_traits_half_vs_std_numeric_limits) {
+#if !defined(KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT) && \
+    !defined(KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT)
+  GTEST_SKIP() << "needs the std half backend (std::float16_t, C++23)";
+#else
+#ifdef KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT
+  test_half_traits_vs_numeric_limits<Kokkos::Experimental::half_t,
+                                     std::float16_t>();
+#endif
+#ifdef KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT
+  test_half_traits_vs_numeric_limits<Kokkos::Experimental::bhalf_t,
+                                     std::bfloat16_t>();
+#endif
+#endif
 }
 
 // Compare to std::numeric_limits

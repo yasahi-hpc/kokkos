@@ -40,7 +40,15 @@
 #   CONFIGS      builds to run         (default: "default native gnu gnu-native")
 #   BUILD_TYPE   CMake build type      (default: Debug)
 #   JOBS         build parallelism     (default: number of CPUs)
-#   FULL         ON: also run the complete test executables (default: OFF)
+#   ENABLE_OPENMP  ON: also enable the OpenMP backend; builds and runs the OpenMP test
+#                executables too, in separate build directories build_std_half_<config>_omp
+#                (default: OFF). OMP_NUM_THREADS defaults to 8.
+#   FULL         ON: also build <backend>2 and <backend>_ViewSupport and run every test
+#                executable without a filter (default: OFF). A FULL run needs more
+#                than the 1 hour of the debug queue above; runs longer than 1 hour
+#                must use the capacity queue:
+#                qsub -q capacity -l walltime=3:00:00 \
+#                     -v 'ENABLE_OPENMP=ON,FULL=ON,CONFIGS=default gnu-native' run_std_half_fp16.sh
 #
 # Output: the job's standard output, also saved as $LOG_DIR/job.out, where LOG_DIR is
 # $BUILD_ROOT/std_half_fp16_logs.<job id>; build and test logs go to the same directory.
@@ -57,6 +65,10 @@ CONFIGS=${CONFIGS:-default native gnu gnu-native}
 BUILD_TYPE=${BUILD_TYPE:-Debug}
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 8)}
 FULL=${FULL:-OFF}
+ENABLE_OPENMP=${ENABLE_OPENMP:-OFF}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+BACKENDS=Serial
+[ "$ENABLE_OPENMP" = ON ] && BACKENDS="Serial OpenMP"
 JOBID=${PBS_JOBID:-local.$(date +%Y%m%d-%H%M%S)}
 LOG_DIR=$BUILD_ROOT/std_half_fp16_logs.${JOBID%%.*}
 
@@ -123,6 +135,11 @@ echo "source:   $KOKKOS_SRC"
 echo "compiler: $CXX: $("$CXX" --version | head -1)"
 echo "cmake:    $(cmake --version | head -1)"
 echo "configs:  $CONFIGS (native: Kokkos_ARCH_$ARCH)"
+if [ "$FULL" = ON ] && [ "${PBS_QUEUE:-}" = debug ]; then
+  echo "WARNING: FULL=ON in the debug queue (1 hour at most) will likely run out of time;"
+  echo "         submit runs longer than 1 hour to the capacity queue: qsub -q capacity -l walltime=3:00:00 ..."
+fi
+echo "backends: $BACKENDS$([ "$ENABLE_OPENMP" = ON ] && echo " (OMP_NUM_THREADS=$OMP_NUM_THREADS)"); FULL=$FULL"
 echo "logs:     $LOG_DIR"
 
 # The probe program: expressions whose value depends on the evaluation method of
@@ -203,10 +220,21 @@ run_test() {  # run_test <config> <build dir> <executable> <filter>
   "$exe" ${4:+--gtest_filter="$4"} > "$log" 2>&1
   local rc=$?
   grep -E '^\[ *(OK|FAILED|PASSED|SKIPPED) *\]|Failure|Expected|Which is|actual' "$log" | tail -40
-  record "$name" "$( [ $rc = 0 ] && grep -m1 'PASSED' "$log" | sed 's/.*PASSED *\] *//' || echo "FAILED (exit $rc, see $log)")"
+  # A skipped test on the std backend means the backend was not selected.
+  local nskip
+  nskip=$(grep -cE '^\[ *SKIPPED *\] [^ ]+\.' "$log")
+  record "$name" "$( [ $rc = 0 ] && grep -m1 'PASSED' "$log" | sed 's/.*PASSED *\] *//' || echo "FAILED (exit $rc, see $log)")$([ "$nskip" -gt 0 ] && echo " ($nskip SKIPPED)")"
 }
 
-TARGETS="kokkoscore Kokkos_CoreTestCompileOnly Kokkos_CoreUnitTest_Serial_SmokeTest Kokkos_CoreUnitTest_Serial1 Kokkos_CoreUnitTest_Default"
+# Test executables: per backend <B>_SmokeTest and <B>1 (and with FULL=ON <B>2 and
+# <B>_ViewSupport), plus Default (the default execution space).
+TESTS=""
+for b in $BACKENDS; do
+  TESTS="$TESTS Kokkos_CoreUnitTest_${b}_SmokeTest Kokkos_CoreUnitTest_${b}1"
+  [ "$FULL" = ON ] && TESTS="$TESTS Kokkos_CoreUnitTest_${b}2 Kokkos_CoreUnitTest_${b}_ViewSupport"
+done
+TESTS="$TESTS Kokkos_CoreUnitTest_Default"
+TARGETS="kokkoscore Kokkos_CoreTestCompileOnly$TESTS"
 
 for cfg in $CONFIGS; do
   case $cfg in
@@ -216,15 +244,16 @@ for cfg in $CONFIGS; do
     gnu-native) ARCH_ARGS=("-DKokkos_ARCH_$ARCH=ON") EXT=ON ;;
     *) die "unknown config '$cfg' in CONFIGS (default, native, gnu, gnu-native)" ;;
   esac
-  B=$BUILD_ROOT/build_std_half_$cfg
+  B=$BUILD_ROOT/build_std_half_$cfg$([ "$ENABLE_OPENMP" = ON ] && echo _omp)
 
-  echo "===== [$cfg] Configure ($BUILD_TYPE, Serial, ${ARCH_ARGS[*]:-no Kokkos_ARCH}, CMAKE_CXX_EXTENSIONS=$EXT)"
+  echo "===== [$cfg] Configure ($BUILD_TYPE, ${BACKENDS// / + }, ${ARCH_ARGS[*]:-no Kokkos_ARCH}, CMAKE_CXX_EXTENSIONS=$EXT)"
   cmake -S "$KOKKOS_SRC" -B "$B" \
     -DCMAKE_CXX_COMPILER="$CXX" \
     -DCMAKE_CXX_STANDARD=23 \
     -DCMAKE_CXX_EXTENSIONS="$EXT" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DKokkos_ENABLE_SERIAL=ON \
+    -DKokkos_ENABLE_OPENMP="$ENABLE_OPENMP" \
     -DKokkos_ENABLE_TESTS=ON \
     -DKokkos_ENABLE_DEBUG=ON \
     "${ARCH_ARGS[@]}" \
@@ -286,11 +315,13 @@ KOKKOS_HALF_T_IS_FLOAT KOKKOS_BHALF_T_IS_FLOAT' | "$CXX" $FLAGS -E -P -x c++ - 2
     tail -20 "$LOG_DIR/${cfg}_fp16_probe.log"
   fi
 
-  run_test "$cfg" "$B" Kokkos_CoreUnitTest_Serial_SmokeTest '*complex*:*atomic*'
-  run_test "$cfg" "$B" Kokkos_CoreUnitTest_Serial1 '*numeric_traits*'
+  for b in $BACKENDS; do
+    run_test "$cfg" "$B" "Kokkos_CoreUnitTest_${b}_SmokeTest" '*complex*:*atomic*'
+    run_test "$cfg" "$B" "Kokkos_CoreUnitTest_${b}1" '*numeric_traits*'
+  done
   run_test "$cfg" "$B" Kokkos_CoreUnitTest_Default '*half*'
   if [ "$FULL" = ON ]; then
-    for t in Kokkos_CoreUnitTest_Serial_SmokeTest Kokkos_CoreUnitTest_Serial1 Kokkos_CoreUnitTest_Default; do
+    for t in $TESTS; do
       run_test "$cfg" "$B" "$t" ''
     done
   fi
@@ -300,7 +331,7 @@ echo "===== Summary"
 status=0
 for i in "${!STEP_NAMES[@]}"; do
   printf '  %-70s %s\n' "${STEP_NAMES[$i]}" "${STEP_RESULTS[$i]}"
-  case "${STEP_RESULTS[$i]}" in ok*|*tests*) ;; *) status=1 ;; esac
+  case "${STEP_RESULTS[$i]}" in *SKIPPED*) status=1 ;; ok*|*tests*) ;; *) status=1 ;; esac
 done
 echo "logs: $LOG_DIR (job output: $LOG_DIR/job.out)"
 exit $status

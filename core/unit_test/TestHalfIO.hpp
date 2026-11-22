@@ -4,15 +4,22 @@
 #ifndef TESTHALFIO_HPP_
 #define TESTHALFIO_HPP_
 
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <initializer_list>
 #include <iomanip>
+#include <iterator>
 #include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#if defined(KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT) || \
+    defined(KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT)
+#include <stdfloat>
+#endif
 
 namespace Test {
 
@@ -230,6 +237,109 @@ void test_half_io_round_trip() {
     }
   }
   EXPECT_EQ(failures, 0);
+}
+
+// On the std backend, compare with libstdc++'s own insertion and extraction of
+// std::float16_t / std::bfloat16_t: the same characters in, the same value
+// bits (NaN: both NaN), the same stream state and the same remaining input;
+// and the same characters out, under several format flags.
+//
+// Not compared: input where the sentry fails (empty, or only whitespace).
+// The standard does the extraction only if the sentry succeeds, so the value
+// stays unchanged (half_io checks that). libstdc++ (GCC 13 to 15 and master)
+// assigns static_cast<_Float16>(__flt) unconditionally, and __flt is then
+// uninitialized, so its result is indeterminate there.
+#if defined(KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT) || \
+    defined(KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT)
+template <class H, class F>
+void test_half_io_vs_std(std::initializer_list<const char *> extra) {
+  static_assert(sizeof(H) == 2 && sizeof(F) == 2);
+  auto bits        = [](auto x) { return Kokkos::bit_cast<std::uint16_t>(x); };
+  auto is_nan      = [](auto x) { return std::isnan(static_cast<float>(x)); };
+  auto check_input = [&](const char *input) {
+    SCOPED_TRACE(std::string("input \"") + input + "\"");
+    std::istringstream ik(input);
+    std::istringstream is(input);
+    H h(7.f);
+    F f = static_cast<F>(7.f);
+    ik >> h;
+    is >> f;
+    EXPECT_EQ(ik.rdstate(), is.rdstate());
+    if (is_nan(f)) {
+      EXPECT_TRUE(is_nan(h)) << std::hex << bits(h);
+    } else {
+      EXPECT_EQ(bits(h), bits(f))
+          << static_cast<float>(h) << " vs " << static_cast<float>(f);
+    }
+    ik.clear();
+    is.clear();
+    std::string rk, rs;
+    std::getline(ik, rk);
+    std::getline(is, rs);
+    EXPECT_EQ(rk, rs);
+  };
+  for (const char *input :
+       {"1",     "3.14159", "-2.5e-3", "1e-7",   "1e-30",    "-0",  "  42",
+        "2,3",   "1.5)",    "x",       "-",      "+",        "e5",  ".",
+        "1e",    "1e+",     "inf",     "-inf",   "infinity", "nan", "-nan",
+        "1e999", "-1e999",  "1e-999",  "0x1p-3", "1.0e0x"}) {
+    check_input(input);
+  }
+  for (const char *input : extra) check_input(input);
+
+  // Output: every 1009th bit pattern (all classes appear), under several
+  // format settings.
+  using Setup          = void (*)(std::ostream &);
+  const Setup setups[] = {
+      [](std::ostream &) {},
+      [](std::ostream &o) { o << std::setprecision(10); },
+      [](std::ostream &o) { o << std::scientific << std::setprecision(3); },
+      [](std::ostream &o) { o << std::fixed << std::setprecision(2); },
+      [](std::ostream &o) { o << std::hexfloat; },
+      [](std::ostream &o) { o << std::showpos << std::uppercase; },
+      [](std::ostream &o) { o << std::setw(12) << std::left; },
+  };
+  int mismatches = 0;
+  for (std::uint32_t b = 0; b <= 0xffff; b += 1009) {
+    const std::uint16_t u = static_cast<std::uint16_t>(b);
+    for (int k = 0; k < static_cast<int>(std::size(setups)); ++k) {
+      std::ostringstream ok;
+      std::ostringstream os;
+      setups[k](ok);
+      setups[k](os);
+      ok << Kokkos::bit_cast<H>(u);
+      os << Kokkos::bit_cast<F>(u);
+      if (ok.str() != os.str() && ++mismatches <= 5) {
+        ADD_FAILURE() << "bits 0x" << std::hex << b << ", setup " << k
+                      << ": Kokkos \"" << ok.str() << "\", libstdc++ \""
+                      << os.str() << "\"";
+      }
+    }
+  }
+  EXPECT_EQ(mismatches, 0);
+}
+#endif
+
+TEST(TEST_CATEGORY, half_io_vs_std) {
+#ifdef KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT
+  // Around max() = 65504: 65519.99 would round to max() in half, but as a
+  // float it is beyond max(), so both store max() with failbit; 5.96e-8 and
+  // 2.98e-8 are near the smallest subnormal and half of it.
+  test_half_io_vs_std<Kokkos::Experimental::half_t, std::float16_t>(
+      {"65504", "65519.99", "65520", "1e5", "-1e5", "5.96e-8", "2.98e-8",
+       "1.000488281250001"});
+#else
+  GTEST_SKIP() << "needs the std half backend (std::float16_t, C++23)";
+#endif
+}
+
+TEST(TEST_CATEGORY, bhalf_io_vs_std) {
+#ifdef KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT
+  test_half_io_vs_std<Kokkos::Experimental::bhalf_t, std::bfloat16_t>(
+      {"3.389e38", "3.4e38", "-3.4e38", "9.2e-41", "1.003906250000001"});
+#else
+  GTEST_SKIP() << "needs the std half backend (std::bfloat16_t, C++23)";
+#endif
 }
 
 TEST(TEST_CATEGORY, half_io) {

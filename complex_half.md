@@ -2257,6 +2257,24 @@ GCC 14.2, Xeon Max 9470C:
   `Kokkos_Half_FloatingPointWrapper.hpp`, and every wrapper operation that reaches one,
   is defined on the std backend: H18 was the only gap of its kind.
 
+*libstdc++ deviates from C++23 on extraction when the sentry fails (found
+2026-11-23, from the source).* [istream.formatted.arithmetic] does the extraction only
+if the sentry succeeds, so on empty input, or input that is only whitespace, the value
+stays unchanged; Kokkos does that (B2 revision, `half_io`). libstdc++'s
+`operator>>(_Float16&)` and `operator>>(__bfloat16_t&)` (`<istream>`, GCC 14 and 15 and
+current master, unchanged) declare `float __flt;`, call `_M_extract(__flt)`, which
+does not write it when the sentry fails, and then assign
+`__f = static_cast<_Float16>(__flt)` unconditionally: the result is an indeterminate
+value. So `half_io_vs_std` does not compare such inputs. Worth reporting to GCC.
+
+*Options added 2026-11-23:* `ENABLE_OPENMP=ON` also enables the OpenMP backend and
+builds and runs `Kokkos_CoreUnitTest_OpenMP_SmokeTest`/`OpenMP1` (separate build
+directories `build_std_half_<config>_omp`, `OMP_NUM_THREADS` default 8). `FULL=ON` also
+builds `<backend>2` and `<backend>_ViewSupport` and runs every test executable without
+a filter; it needs more than 1 hour, and runs longer than 1 hour must use the
+`capacity` queue (`qsub -q capacity -l walltime=3:00:00 -v FULL=ON,...`). A
+skipped test now fails the summary, since on the std backend nothing should skip.
+
 *Run on Aurora (PBS job 9116902, 2026-11-22): all tests pass.* Xeon Max 9470C
 (`avx512_fp16`), GCC 14.2.0, commit `b5d91eb67`, Debug, Serial:
 
@@ -2511,9 +2529,9 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~**GNU dialect** `-std=gnu++23`, Kokkos's default for GCC~~ | done 2026-11-23, job 9117216: same probe values and test results as strict `-std=c++23`, with and without native half (§8.2) | Aurora |
 | ~~**Declared but undefined cast functions** (the H18 pattern)~~ | done 2026-11-23: `half_cast_overloads`/`bhalf_cast_overloads` pass on the std backend (job 9117216, four builds) and on CUDA (job 10404595); none missing. HIP/SYCL: run the same tests there (§8.3, §8.4) | Aurora, A100; HIP/SYCL pending |
 | aarch64 with native half arithmetic (`Kokkos_ARCH_ARMV9_GRACE` or another FP16 `-mcpu`): expect method 16 and the Sapphire Rapids probe results | verification (proposed) | GCC 15 aarch64 machine: `run_std_half_gcc13.sh` with an arch option |
-| Numeric traits of `half_t`/`bhalf_t` against `std::numeric_limits<std::float16_t/bfloat16_t>`, bit for bit | verification (proposed); so far checked only against hand-written IEEE values | GCC ≥ 13 |
-| Stream I/O of `half_t`/`bhalf_t` against libstdc++'s `std::float16_t`/`std::bfloat16_t` extractor and inserter (values and stream state: out of range, `"x"`, empty, rounding) | verification of the B2 revision (proposed) | GCC ≥ 13 |
-| `ENABLE_OPENMP=ON` and `FULL=ON` (complete test executables), strict and GNU dialects | verification (proposed) | GCC ≥ 13 |
+| Numeric traits of `half_t`/`bhalf_t` against `std::numeric_limits<std::float16_t/bfloat16_t>`, bit for bit | test `numeric_traits_half_vs_std_numeric_limits` added 2026-11-23 (`TestNumericTraits.hpp`, in `*numeric_traits*`; skips without the std backend): the 7 value traits bit for bit, the NaNs by kind (quiet bit; payload unspecified), the 8 integer traits; to run on Aurora | GCC ≥ 13 |
+| Stream I/O of `half_t`/`bhalf_t` against libstdc++'s `std::float16_t`/`std::bfloat16_t` extractor and inserter | tests `half_io_vs_std`/`bhalf_io_vs_std` added 2026-11-23 (`TestHalfIO.hpp`, in `*half*`; skip without the std backend): ~30 inputs per type compared in value bits, stream state and remaining input; output of every 1009th bit pattern under 7 format settings. Excluded: inputs where the sentry fails, see the libstdc++ note in §8.2; to run on Aurora | GCC ≥ 13 |
+| `ENABLE_OPENMP=ON` and `FULL=ON` (complete test executables), strict and GNU dialects | options added to `run_std_half_fp16.sh` 2026-11-23 (§8.2); to run on Aurora, `FULL` in the `capacity` queue (over 1 hour) | GCC ≥ 13 |
 | GCC 13 (only 14.2 and 15.2 tested) | verification (proposed) | wherever a GCC 13 module exists |
 | Optional: complex functions vs `std::complex<std::float16_t>` over the `ch3acc` inputs (expected equal up to the last bit) | measurement (proposed) | GCC ≥ 13, both evaluation methods |
 | A8 (D11), half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and a build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF` | after A8 | GCC ≥ 13 |
