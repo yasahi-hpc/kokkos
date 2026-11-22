@@ -2291,8 +2291,25 @@ share no build directories).*
   the new tests pass here too. Two script errors, fixed since: the OpenMP test
   executable is `Kokkos_CoreUnitTest_OpenMP` (not `OpenMP1`/`OpenMP2`, which do not
   exist; so it was not built or run), and the skips it reported (7 in Serial1, 3 in
-  Default, …, each counted twice) are Kokkos's own, not failures. To do: rerun with
-  `ENABLE_OPENMP=ON FULL=ON` for `Kokkos_CoreUnitTest_OpenMP` and `OpenMPInterOp`.
+  Default, …, each counted twice) are Kokkos's own, not failures.
+- **Job 9117446** (rerun at `ef0391887`, same settings, `capacity` queue): all pass in
+  both builds, all 11 targets with 0 warnings:
+
+  | executable | tests |
+  |---|---|
+  | `Serial_SmokeTest` / `Serial1` / `Serial2` / `Serial_ViewSupport` | 126 / 217 / 127 / 37 |
+  | `OpenMP_SmokeTest` / `OpenMP` / `OpenMP_ViewSupport` / `OpenMPInterOp` | 125 / 333 / 37 / 1 |
+  | `Default` | 74 |
+  | filtered: `*complex*:*atomic*` (Serial, OpenMP) / `*numeric_traits*` (Serial1, OpenMP) / `*half*` | 25, 25 / 15, 15 / 14 |
+
+  `numeric_traits_half_vs_std_numeric_limits` passes on `serial` and `openmp`, and
+  `half_io_vs_std`/`bhalf_io_vs_std` pass, in both builds. The skips (4-9 per Serial
+  executable, 5 in `OpenMP_SmokeTest`, 3 in `Default`, 27 in `OpenMP`: 10 death tests and
+  17 infrastructure tests such as partitioning, execution-space thread safety and
+  allocation corner cases) are Kokkos's own; none involves complex, half or the numeric
+  traits. **So the committed complex/half work passes the complete Kokkos core test
+  suite on the std half backend, Serial and OpenMP, in the GNU dialect and with native
+  half arithmetic.**
 
 *Run on Aurora (PBS job 9116902, 2026-11-22): all tests pass.* Xeon Max 9470C
 (`avx512_fp16`), GCC 14.2.0, commit `b5d91eb67`, Debug, Serial:
@@ -2551,7 +2568,7 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~Numeric traits of `half_t`/`bhalf_t` against `std::numeric_limits<std::float16_t/bfloat16_t>`~~ | done 2026-11-23: `numeric_traits_half_vs_std_numeric_limits` passes in all four builds (job 9117303) and in `default`/`gnu-native` with OpenMP (job 9117309); all traits agree | GCC ≥ 13 |
 | ~~Stream I/O of `half_t`/`bhalf_t` against libstdc++'s `std::float16_t`/`std::bfloat16_t` extractor and inserter~~ | done 2026-11-23: `half_io_vs_std`/`bhalf_io_vs_std` pass in all four builds (job 9117303) and with OpenMP (job 9117309); Kokkos matches libstdc++ for every compared input and format. Not compared: sentry failures, where libstdc++ deviates from C++23 (§8.2) | GCC ≥ 13 |
 | Report the libstdc++ extraction deviation (sentry failure assigns an uninitialized float; GCC 14, 15, master) to GCC | optional, external | — |
-| `ENABLE_OPENMP=ON` and `FULL=ON` (complete test executables), strict and GNU dialects | mostly done (job 9117309, `default` and `gnu-native`): every built executable passes; the OpenMP test executable was not built (wrong target name in the script, fixed); rerun for `Kokkos_CoreUnitTest_OpenMP` | Aurora, `capacity` queue |
+| ~~`ENABLE_OPENMP=ON` and `FULL=ON` (complete test executables)~~ | done 2026-11-23: job 9117446 (`default` and `gnu-native`, Serial + OpenMP): every core test executable builds with 0 warnings and passes, including `Kokkos_CoreUnitTest_OpenMP` (333) and `OpenMPInterOp` (§8.2) | Aurora, `capacity` queue |
 | GCC 13 (only 14.2 and 15.2 tested) | verification (proposed) | wherever a GCC 13 module exists |
 | Optional: complex functions vs `std::complex<std::float16_t>` over the `ch3acc` inputs (expected equal up to the last bit) | measurement (proposed) | GCC ≥ 13, both evaluation methods |
 | A8 (D11), half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and a build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF` | after A8 | GCC ≥ 13 |
