@@ -2230,6 +2230,10 @@ one half multiplication at `-O2`, and a probe program whose results differ betwe
 float and half evaluation (`std::float16_t` scalar, `std::complex<std::float16_t>` and
 `Kokkos::complex<half_t>` `*` and `/`). Its output is also saved as
 `std_half_fp16_logs.<job>/job.out`.
+*Extended 2026-11-23:* two more builds in Kokkos's default GCC dialect, `gnu` and
+`gnu-native` (`CMAKE_CXX_EXTENSIONS=ON`, `-std=gnu++23`; the probe prints the
+`-std=` flag and `__STRICT_ANSI__`), so `CONFIGS` defaults to
+`default native gnu gnu-native`; a build now fails on GCC's "used but never defined".
 
 *Run on Aurora (PBS job 9116902, 2026-11-22): all tests pass.* Xeon Max 9470C
 (`avx512_fp16`), GCC 14.2.0, commit `b5d91eb67`, Debug, Serial:
@@ -2482,6 +2486,15 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | B4b-HIP (and CH5 on HIP) | future work, needs a workaround | AMD GPU |
 | B4b-SYCL (and CH5 on SYCL) | future work | Intel GPU (compile-time checks also here) |
 | Locale branch of `half_io` | verification | any machine with `de_DE`/`fr_FR` UTF-8 locales |
+| **GNU dialect** `-std=gnu++23`: Kokkos's default for GCC when `CMAKE_CXX_EXTENSIONS` is unset (`cmake/kokkos_test_cxx_std.cmake`); every GCC ≥ 13 run so far used strict `-std=c++23`. GNU mode changes GCC's `-fexcess-precision` default, so half expressions may round differently | verification (proposed 2026-11-23) | Aurora: `run_std_half_fp16.sh` configs `gnu`, `gnu-native` |
+| **Declared but undefined cast functions** (the H18 pattern): every `cast_to_half`/`cast_from_half`/`cast_to_bhalf`/`cast_from_bhalf` overload declared in `Kokkos_Half_FloatingPointWrapper.hpp`, and the wrapper operations that reach them | verification; test `half_cast_overloads`/`bhalf_cast_overloads` added (2026-11-23; passes on CUDA, A100 job 10404595, host and device); builds fail on "used but never defined" | Aurora: `run_std_half_fp16.sh` (`*half*`); also CUDA/HIP/SYCL |
+| aarch64 with native half arithmetic (`Kokkos_ARCH_ARMV9_GRACE` or another FP16 `-mcpu`): expect method 16 and the Sapphire Rapids probe results | verification (proposed) | GCC 15 aarch64 machine: `run_std_half_gcc13.sh` with an arch option |
+| Numeric traits of `half_t`/`bhalf_t` against `std::numeric_limits<std::float16_t/bfloat16_t>`, bit for bit | verification (proposed); so far checked only against hand-written IEEE values | GCC ≥ 13 |
+| Stream I/O of `half_t`/`bhalf_t` against libstdc++'s `std::float16_t`/`std::bfloat16_t` extractor and inserter (values and stream state: out of range, `"x"`, empty, rounding) | verification of the B2 revision (proposed) | GCC ≥ 13 |
+| `ENABLE_OPENMP=ON` and `FULL=ON` (complete test executables), strict and GNU dialects | verification (proposed) | GCC ≥ 13 |
+| GCC 13 (only 14.2 and 15.2 tested) | verification (proposed) | wherever a GCC 13 module exists |
+| Optional: complex functions vs `std::complex<std::float16_t>` over the `ch3acc` inputs (expected equal up to the last bit) | measurement (proposed) | GCC ≥ 13, both evaluation methods |
+| A8 (D11), half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and a build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF` | after A8 | GCC ≥ 13 |
 | Pre-Ampere bf16 double rounding at run time (B4 notes) | known gap, unfixed | none of the available machines: needs an NVIDIA GPU older than sm_80 |
 
 Still open but testable **on this machine** (no other machine needed):

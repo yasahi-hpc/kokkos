@@ -2,7 +2,7 @@
 #PBS -N AFFINITY
 #PBS -l select=1
 #PBS -l place=scatter
-#PBS -l walltime=0:60:00
+#PBS -l walltime=1:00:00
 #PBS -l filesystems=flare
 #PBS -q debug
 #PBS -A kokkos_math
@@ -18,6 +18,13 @@
 #            _Float16 in half (method 16), so the scalar half_t operators and
 #            libstdc++'s std::complex<std::float16_t> multiplication change; Kokkos's
 #            complex<half_t> * and / should not (CH3 computes in float).
+#   gnu, gnu-native  the same two in Kokkos's default dialect for GCC, -std=gnu++23
+#            (CMAKE_CXX_EXTENSIONS=ON; default and native use strict -std=c++23).
+#            GNU mode changes GCC's -fexcess-precision default, which may change
+#            how half expressions round.
+# A build fails if GCC reports "used but never defined" (a cast function declared
+# for the backend but not defined, as H18 was); the half tests include
+# half_cast_overloads/bhalf_cast_overloads, which call every declared cast.
 # For each build it records the evaluation method, the generated code for a half
 # multiplication, and the results of a few expressions where the two methods differ.
 #
@@ -30,7 +37,7 @@
 #   CXX          C++ compiler, GCC only (default: the first GCC >= 13 of g++-14, g++-13,
 #                g++; a non-GCC CXX from the environment, e.g. oneAPI's icpx, is ignored)
 #   ARCH         Kokkos_ARCH_<ARCH> of the native build (default: SPR)
-#   CONFIGS      builds to run         (default: "default native")
+#   CONFIGS      builds to run         (default: "default native gnu gnu-native")
 #   BUILD_TYPE   CMake build type      (default: Debug)
 #   JOBS         build parallelism     (default: number of CPUs)
 #   FULL         ON: also run the complete test executables (default: OFF)
@@ -46,7 +53,7 @@ set -uo pipefail
 KOKKOS_SRC=${KOKKOS_SRC:-$PWD}
 BUILD_ROOT=${BUILD_ROOT:-$KOKKOS_SRC}
 ARCH=${ARCH:-SPR}
-CONFIGS=${CONFIGS:-default native}
+CONFIGS=${CONFIGS:-default native gnu gnu-native}
 BUILD_TYPE=${BUILD_TYPE:-Debug}
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 8)}
 FULL=${FULL:-OFF}
@@ -203,17 +210,19 @@ TARGETS="kokkoscore Kokkos_CoreTestCompileOnly Kokkos_CoreUnitTest_Serial_SmokeT
 
 for cfg in $CONFIGS; do
   case $cfg in
-    default) ARCH_ARGS=() ;;
-    native) ARCH_ARGS=("-DKokkos_ARCH_$ARCH=ON") ;;
-    *) die "unknown config '$cfg' in CONFIGS (default, native)" ;;
+    default) ARCH_ARGS=() EXT=OFF ;;
+    native) ARCH_ARGS=("-DKokkos_ARCH_$ARCH=ON") EXT=OFF ;;
+    gnu) ARCH_ARGS=() EXT=ON ;;
+    gnu-native) ARCH_ARGS=("-DKokkos_ARCH_$ARCH=ON") EXT=ON ;;
+    *) die "unknown config '$cfg' in CONFIGS (default, native, gnu, gnu-native)" ;;
   esac
   B=$BUILD_ROOT/build_std_half_$cfg
 
-  echo "===== [$cfg] Configure ($BUILD_TYPE, Serial, ${ARCH_ARGS[*]:-no Kokkos_ARCH})"
+  echo "===== [$cfg] Configure ($BUILD_TYPE, Serial, ${ARCH_ARGS[*]:-no Kokkos_ARCH}, CMAKE_CXX_EXTENSIONS=$EXT)"
   cmake -S "$KOKKOS_SRC" -B "$B" \
     -DCMAKE_CXX_COMPILER="$CXX" \
     -DCMAKE_CXX_STANDARD=23 \
-    -DCMAKE_CXX_EXTENSIONS=OFF \
+    -DCMAKE_CXX_EXTENSIONS="$EXT" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DKokkos_ENABLE_SERIAL=ON \
     -DKokkos_ENABLE_TESTS=ON \
@@ -234,11 +243,12 @@ for cfg in $CONFIGS; do
     cmake --build "$B" -j "$JOBS" --target "$t" > "$LOG_DIR/${cfg}_build_$t.log" 2>&1
     rc=$?
     nwarn=$(grep -c 'warning:' "$LOG_DIR/${cfg}_build_$t.log")
-    if [ $rc = 0 ]; then
+    nundef=$(grep -c 'used but never defined' "$LOG_DIR/${cfg}_build_$t.log")
+    if [ $rc = 0 ] && [ "$nundef" = 0 ]; then
       record "$cfg: build $t" "ok ($nwarn warnings)"
     else
-      record "$cfg: build $t" "FAILED (see $LOG_DIR/${cfg}_build_$t.log)"
-      grep -m10 'error' "$LOG_DIR/${cfg}_build_$t.log"
+      record "$cfg: build $t" "FAILED (exit $rc, $nundef 'used but never defined'; see $LOG_DIR/${cfg}_build_$t.log)"
+      grep -m10 -E 'error|used but never defined' "$LOG_DIR/${cfg}_build_$t.log"
     fi
     [ "$nwarn" -gt 0 ] && grep 'warning:' "$LOG_DIR/${cfg}_build_$t.log" | sort | uniq -c | sort -rn | head -10
   done
@@ -246,9 +256,10 @@ for cfg in $CONFIGS; do
   # The probes, with the tests' own flags (so the arch flags are included).
   echo "===== [$cfg] Half evaluation (with the tests' flags)"
   FLAGS=$(test_flags "$B")
+  echo "  dialect: $(echo "$FLAGS" | grep -oE -- '-std=[a-z+0-9]+' | sort -u | tr '\n' ' ')"
   # shellcheck disable=SC2086
   (cd "$B" && echo | "$CXX" $FLAGS -dM -E -x c++ - 2>&1 |
-    grep -E '__FLT_EVAL_METHOD(_TS_18661_3)?__ |__AVX512FP16__ |__STDCPP_B?FLOAT16_T__ ' |
+    grep -E '__FLT_EVAL_METHOD(_TS_18661_3)?__ |__AVX512FP16__ |__STDCPP_B?FLOAT16_T__ |__STRICT_ANSI__ ' |
     sed 's/^#define /  /')
   # shellcheck disable=SC2086
   (cd "$B" && echo '#include <Kokkos_Macros.hpp>

@@ -202,6 +202,128 @@ void test_half_assign_trait_constants() {
   }
 }
 
+// Every cast function declared in Kokkos_Half_FloatingPointWrapper.hpp, and
+// every floating_point_wrapper operation that reaches one through
+// cast_to_wrapper/cast_from_wrapper, called once with a value of 1. A backend
+// that declares one of them without defining it fails to link here (H18 was
+// such a case). Returns the number of wrong results.
+KOKKOS_FUNCTION inline Kokkos::Experimental::half_t cast_to(
+    Kokkos::Experimental::half_t *, Kokkos::Experimental::half_t x) {
+  return Kokkos::Experimental::cast_to_half(x);
+}
+template <class T>
+KOKKOS_FUNCTION Kokkos::Experimental::half_t cast_to(
+    Kokkos::Experimental::half_t *, T x) {
+  return Kokkos::Experimental::cast_to_half(x);
+}
+template <class T>
+KOKKOS_FUNCTION T cast_from(Kokkos::Experimental::half_t x) {
+  return Kokkos::Experimental::cast_from_half<T>(x);
+}
+#if !KOKKOS_BHALF_T_IS_FLOAT
+KOKKOS_FUNCTION inline Kokkos::Experimental::bhalf_t cast_to(
+    Kokkos::Experimental::bhalf_t *, Kokkos::Experimental::bhalf_t x) {
+  return Kokkos::Experimental::cast_to_bhalf(x);
+}
+template <class T>
+KOKKOS_FUNCTION Kokkos::Experimental::bhalf_t cast_to(
+    Kokkos::Experimental::bhalf_t *, T x) {
+  return Kokkos::Experimental::cast_to_bhalf(x);
+}
+template <class T>
+KOKKOS_FUNCTION T cast_from(Kokkos::Experimental::bhalf_t x) {
+  return Kokkos::Experimental::cast_from_bhalf<T>(x);
+}
+#endif
+
+template <class H, class T>
+KOKKOS_FUNCTION int check_half_cast_overloads_for() {
+  int err        = 0;
+  const H one    = H(1.f);
+  const double d = 1.0;
+  // The cast functions themselves.
+  err += static_cast<double>(cast_to(static_cast<H *>(nullptr), T(1))) != d;
+  err += cast_from<T>(one) != T(1);
+  // Wrapper paths: constructor and operator=(T) (cast_to_wrapper), conversion
+  // (cast_from_wrapper).
+  H c(T(1));
+  err += static_cast<double>(c) != d;
+  H a;
+  a = T(1);
+  err += static_cast<double>(a) != d;
+  err += static_cast<T>(one) != T(1);
+  if constexpr (!std::is_same_v<T, bool>) {
+    // Mixed binary operators.
+    err += static_cast<double>(one + T(1)) != 2.0;
+    err += static_cast<double>(T(1) + one) != 2.0;
+    err += static_cast<double>(one - T(1)) != 0.0;
+    err += static_cast<double>(T(1) - one) != 0.0;
+    err += static_cast<double>(one * T(1)) != d;
+    err += static_cast<double>(T(1) * one) != d;
+    err += static_cast<double>(one / T(1)) != d;
+    err += static_cast<double>(T(1) / one) != d;
+    // Compound assignment exists only with float and double (both
+    // directions); integers would be ambiguous between them.
+    if constexpr (std::is_floating_point_v<T>) {
+      T x = T(1);
+      x += one;
+      err += x != T(2);
+      x -= one;
+      err += x != T(1);
+      x *= one;
+      err += x != T(1);
+      x /= one;
+      err += x != T(1);
+      H h = one;
+      h += T(1);
+      err += static_cast<double>(h) != 2.0;
+    }
+  }
+  return err;
+}
+
+template <class H>
+KOKKOS_FUNCTION int check_half_cast_overloads() {
+  int err = 0;
+  err += check_half_cast_overloads_for<H, bool>();
+  err += check_half_cast_overloads_for<H, float>();
+  err += check_half_cast_overloads_for<H, double>();
+  err += check_half_cast_overloads_for<H, short>();
+  err += check_half_cast_overloads_for<H, int>();
+  err += check_half_cast_overloads_for<H, long>();
+  err += check_half_cast_overloads_for<H, long long>();
+  err += check_half_cast_overloads_for<H, unsigned short>();
+  err += check_half_cast_overloads_for<H, unsigned int>();
+  err += check_half_cast_overloads_for<H, unsigned long>();
+  err += check_half_cast_overloads_for<H, unsigned long long>();
+  // The identity casts.
+  const H one = H(1.f);
+  err += static_cast<double>(cast_to(static_cast<H *>(nullptr), one)) != 1.0;
+  H a;
+  a = one;
+  err += static_cast<double>(a) != 1.0;
+  return err;
+}
+
+template <class H>
+void test_half_cast_overloads() {
+  EXPECT_EQ(check_half_cast_overloads<H>(), 0);
+  int errors = 0;
+  Kokkos::parallel_reduce(
+      "TestHalfCastOverloads", Kokkos::RangePolicy<TEST_EXECSPACE>(0, 1),
+      KOKKOS_LAMBDA(int, int &err) { err += check_half_cast_overloads<H>(); },
+      errors);
+  EXPECT_EQ(errors, 0);
+}
+
+TEST(TEST_CATEGORY, half_cast_overloads) {
+  test_half_cast_overloads<Kokkos::Experimental::half_t>();
+}
+
+TEST(TEST_CATEGORY, bhalf_cast_overloads) {
+  test_half_cast_overloads<Kokkos::Experimental::bhalf_t>();
+}
+
 TEST(TEST_CATEGORY, half_assign_trait_constants) {
   test_half_assign_trait_constants<Kokkos::Experimental::half_t>();
 }
