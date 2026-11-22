@@ -1955,14 +1955,24 @@ float what C++23 does for `std::complex<std::float16_t>`?
   matches libstdc++ for every operation.** Not checked: a CPU option that enables FP16
   arithmetic (e.g. `Kokkos_ARCH_ARMV9_GRACE`, `-mcpu=neoverse-v2`), which is expected
   to give 16, as `-mavx512fp16` does on x86.
-- **Aurora, GCC 14, `-march=sapphirerapids` (job 9116902; §8.2):** method 16 confirmed,
-  and a half `*` compiles to `vmulsh`, so on this target libstdc++'s
-  `std::complex<std::float16_t>` `*` is expected to round each product to half. Kokkos's
-  complex tests, including `complex_half_compute_in_float`, pass there. The probe that
-  prints libstdc++'s actual result failed to compile in that run (fixed; rerun pending).
-- **Still to confirm** (C++ front end, real `std::complex<std::float16_t>`): compare
-  `std::complex<std::float16_t>` with Kokkos on the `ch3acc` inputs (D5 to-do, §8.2),
-  and the method with an FP16-enabling CPU option.
+- **Aurora, GCC 14 (jobs 9116902 and 9116933; §8.2): the `*` row measured.** With
+  `-march=sapphirerapids` (`Kokkos_ARCH_SPR`) the method is 16 and a half `*` compiles
+  to `vmulsh`. The probe (job 9116933), real `std::complex<std::float16_t>` from
+  libstdc++ 14:
+
+  | | method 0 (no `Kokkos_ARCH`) | method 16 (`Kokkos_ARCH_SPR`) |
+  |---|---|---|
+  | `std::complex<std::float16_t>` `(269,111.5)²` | (59936, 60000) | **(inf, 60000)** |
+  | `Kokkos::complex<half_t>` `(269,111.5)²` | (59936, 60000) | (59936, 60000) |
+  | both: `(60000,60000)/(1,1)` | (60000, 0) | (60000, 0) |
+
+  So libstdc++'s `*` follows the evaluation method (each product rounded to half under
+  16, and `269²` overflows), its `/` is float under both, and Kokkos is the same under
+  both. **The conclusion above holds, now measured:** CH3 matches libstdc++ everywhere
+  except `*` on FP16-native targets, where Kokkos is more accurate; both conform.
+- **Not done (optional):** compare `std::complex<std::float16_t>` with Kokkos over the
+  `ch3acc` inputs, for the functions (expected: the same up to the last bit, since both
+  compute in float).
 
 **CH4. Interop with `std::complex<std::float16_t>` on C++23 host builds (D2). — FUTURE WORK (decided 2026-11-22).**
 *Not implemented: it needs GCC ≥ 13 in C++23 mode (`KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT`),
@@ -2209,14 +2219,26 @@ float and half evaluation (`std::float16_t` scalar, `std::complex<std::float16_t
 | `HALF_T_IS_FLOAT`, `BHALF_T_IS_FLOAT` | false, false | false, false |
 | one half `*` (`std::float16_t` and `half_t`) | through float: `__extendhfsf2`, `mulss`, `__truncsfhf2` | **`vmulsh`** |
 | tests `*complex*:*atomic*` / `*numeric_traits*` / `*half*` | 25 / 14 / 8 pass | 25 / 14 / 8 pass |
-| build warnings | 0 | 279, one kind (below) |
+| build warnings | 0 | 279, one kind (below); 7 after the fix (job 9116933) |
 
 So with native half arithmetic the scalar `half_t` operators compute in half, and the
 complex tests still pass, including `complex_half_compute_in_float` (bit-identical to the
 float path): CH3's `*`, `/` and functions do not depend on the evaluation method. The
 probe program did not compile in this run (`complex<H> k(H(v269), H(v111))` parsed as a
-function declaration; fixed with braces), so libstdc++'s
-`std::complex<std::float16_t>` results under method 16 are still to be read (D5).
+function declaration; fixed with braces).
+
+*Rerun (PBS job 9116933, 2026-11-22, commit `3c70cfdca`): all tests pass again, and the
+probe runs.* Same node type and compiler. Probe output:
+
+| | `default` (method 0) | `native` (method 16) |
+|---|---|---|
+| `std::float16_t` `256*256-65000` | 544 (float: 65536 − 64992, as 65000 rounds to 64992 in half) | inf |
+| `half_t` `256*256-65000` | inf (each operator rounds to half) | inf |
+| `std::complex<std::float16_t>` `(269,111.5)²` | (59936, 60000) | **(inf, 60000)** |
+| `Kokkos::complex<half_t>` `(269,111.5)²` | (59936, 60000) | (59936, 60000) |
+| `(60000,60000)/(1,1)`, std and Kokkos | (60000, 0) | (60000, 0) |
+
+This closes the D5 multiplication question (see "CH3 vs. C++23 and libstdc++").
 
 *The 279 warnings* are GCC ≥ 13's "`__bfloat16` is redefined from typedef `short` to
 real `__bf16` since GCC 13.1 …", emitted wherever the x86 BF16 intrinsics are visible.
@@ -2225,10 +2247,18 @@ in `Kokkos_STD_Half_Conversion.hpp` (predating this branch, `c7d070bc6`), and GC
 reports them at six test lines that construct `bhalf_t` (`TestNumericTraits.hpp:114,123`,
 `TestMathematicalFunctions.hpp:2965-2967`, `TestReduce.hpp:789`,
 `TestHalfOperators.hpp:972`). The results are right (`bhalf_conversion` and the numeric
-traits pass). *Fix (2026-11-22, not yet built):* those four overloads now convert
-through `float`, which holds every `short`, `unsigned short` and `std::bfloat16_t`
-value exactly, so the results are those of the direct conversion. Whether the reports
-at the test lines also go away is to be checked in the next run.
+traits pass). *Fix (commit `3c70cfdca`, verified by job 9116933):* those four overloads
+now convert through `float`, which holds every `short`, `unsigned short` and
+`std::bfloat16_t` value exactly, so the results are those of the direct conversion.
+279 → 7 warnings; none from `Kokkos_STD_Half_Conversion.hpp`, all tests pass.
+
+*The 7 remaining warnings* are the six test lines above (`TestNumericTraits.hpp:114`
+twice). Each initializes a `bhalf_t` from a numeric-trait constant
+(`infinity`/`epsilon`/`finite_max`… of `bhalf_t`, a `BitComparisonWrapper`). That goes
+through `floating_point_wrapper(bit_comparison_type)`, which copies the bits with
+`Kokkos::bit_cast` (`memcpy`), so there is no value conversion, and the values are
+checked by the passing tests. Why GCC reports them is not known (GCC 12 here lacks the
+warning; a reproducer on Aurora would tell). Status: harmless, test-only, open.
 
 *Validation of committed work* (first done by the run above; the points below all
 passed there):
@@ -2258,12 +2288,12 @@ passed there):
   deprecates I1 and I6, keeps their half coverage in its deprecated-code test, and
   does not add tests constructing from `std::complex<half_t>`; for half on C++23 the
   standard route is CH4.
-- **D5 to-do (mostly answered; see "CH3 vs. C++23 and libstdc++"):** from source,
-  libstdc++ computes all functions in float, and `/` in float. `*` follows the
-  compiler's `_Float16` evaluation method: float on x86 without AVX512-FP16, half with
-  it; on the aarch64 machine with default options it is float (method 0, job 4260499).
-  Still to do: compare `std::complex<std::float16_t>` with Kokkos on the `ch3acc`
-  inputs, and the method with an FP16-enabling `-mcpu`/`Kokkos_ARCH_*`.
+- ~~**D5 to-do**~~ (*answered 2026-11-22*; see "CH3 vs. C++23 and libstdc++"): libstdc++
+  computes all functions and `/` in float; `*` follows the evaluation method: float
+  under method 0 (aarch64 default, job 4260499; x86 default, job 9116933), half under
+  method 16 (`-march=sapphirerapids`, job 9116933: `(269,111.5)²` = `(inf, 60000)`, while
+  Kokkos gives `(59936, 60000)`). Optional: compare the functions with Kokkos over the
+  `ch3acc` inputs.
 
 *Future tasks that become testable here:*
 - **B4a:** `constexpr` std backend; native conversions, so no software path.
@@ -2326,7 +2356,8 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 |---|---|---|
 | ~~Validation of A1-A7, B1-B3, CH1-CH3, H17 with the std half backend~~ | done 2026-11-22, job 4260499: 25 + 14 + 8 tests pass, 0 warnings (GCC 15, aarch64; Serial only) | GCC ≥ 13, C++23 (§8.2) |
 | ~~`std::complex<half_t>` interop with libstdc++ ≥ 13 (half-complex.md §3.2)~~ | done 2026-11-22, job 4260499 (GCC 15; 13/14 not run); no further work (§8.2, A8) | GCC ≥ 13 |
-| D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision | measurement (source analysis done: float, except `*` on FP16-native CPUs; aarch64 default options: float, job 4260499; x86 `-march=sapphirerapids`: half, `vmulsh`, Kokkos tests pass, job 9116902); left: the probe's libstdc++ values (rerun `run_std_half_fp16.sh`), compare with Kokkos on `ch3acc` inputs | GCC ≥ 13 |
+| ~~D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision~~ | done 2026-11-22 (jobs 4260499, 9116902, 9116933): float except `*` under method 16, where libstdc++ overflows and Kokkos does not; optional: functions over the `ch3acc` inputs | GCC ≥ 13 |
+| Remaining 7 `__bfloat16` warnings at test lines (`-march=sapphirerapids`) | open, harmless (bit copies; tests pass); cause unknown | GCC ≥ 13 on Aurora (reproducer) |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
 | B4a: `constexpr` half, std backend | future work | GCC ≥ 13 |

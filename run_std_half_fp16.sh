@@ -138,10 +138,11 @@ volatile float v256 = 256.f, v65000 = 65000.f, v269 = 269.f, v111 = 111.5f,
 
 int main() {
   std::printf("PROBE eval_method_ts=%d\n", __FLT_EVAL_METHOD_TS_18661_3__);
-  // 256*256 = 65536 overflows half; in float the subtraction brings it back to 536.
+  // 256*256 = 65536 overflows half; in float the subtraction brings it back to
+  // 65536 - 64992 = 544 (65000 is not representable in half; it rounds to 64992).
   const F16 a = static_cast<F16>(v256), c = static_cast<F16>(v65000);
   const F16 r = a * a - c;
-  std::printf("PROBE std_float16_t   256*256-65000        = %g   (float: 536, half: inf)\n", d(r));
+  std::printf("PROBE std_float16_t   256*256-65000        = %g   (float: 544, half: inf)\n", d(r));
   const H ha(v256), hc(v65000);
   const H hr = ha * ha - hc;
   std::printf("PROBE kokkos_half_t   256*256-65000        = %g   (rounded per operation: inf)\n", d(hr));
