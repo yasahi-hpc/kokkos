@@ -1974,9 +1974,10 @@ float what C++23 does for `std::complex<std::float16_t>`?
   `__FLT_EVAL_METHOD_TS_18661_3__` = 0 (and `__FLT_EVAL_METHOD__` = 0) with the tests'
   flags, i.e. Kokkos's default target options, no `Kokkos_ARCH_*`. GCC then evaluates
   `_Float16` in float, so libstdc++'s `*` is float too: **on that configuration CH3
-  matches libstdc++ for every operation.** Not checked: a CPU option that enables FP16
-  arithmetic (e.g. `Kokkos_ARCH_ARMV9_GRACE`, `-mcpu=neoverse-v2`), which is expected
-  to give 16, as `-mavx512fp16` does on x86.
+  matches libstdc++ for every operation.** With `Kokkos_ARCH_ARMV9_GRACE`
+  (`-mcpu=neoverse-v2`; job 4264666, 2026-11-23, §8.2 "Grace run") the method is 16,
+  as with `-mavx512fp16` on x86: a half `*` compiles to `fmul h…`, libstdc++'s
+  `(269,111.5)²` overflows to `(inf, 60000)`, and Kokkos gives `(59936, 60000)`.
 - **Aurora, GCC 14 (jobs 9116902 and 9116933; §8.2): the `*` row measured.** With
   `-march=sapphirerapids` (`Kokkos_ARCH_SPR`) the method is 16 and a half `*` compiles
   to `vmulsh`. The probe (job 9116933), real `std::complex<std::float16_t>` from
@@ -2271,7 +2272,33 @@ value. So `half_io_vs_std` does not compare such inputs. Worth reporting to GCC.
 use `Kokkos_ARCH_ARMV9_GRACE`, the CPU check is `fphp` in `/proc/cpuinfo`, and the code
 probe counts `fmul h…` (native) and `fcvt s…, h…` (through float). On the Grace
 machine submit `run_std_half_fp16_grace.sh`, which sets that machine's PBS header and
-modules and runs `run_std_half_fp16.sh`.
+modules and runs `run_std_half_fp16.sh`. Step by step: `aarch64_tests.md`.
+
+*Grace run (PBS job 4264666, 2026-11-23, commit `48e69227b`): all pass, native half
+confirmed.* `mg0639`, Neoverse-V2 (`fphp`, `asimdhp`), GCC 15.2.0, CMake 3.31.1, Debug,
+Serial. The builds need binutils ≥ 2.41: the `gcc/15.2.0` module uses the system
+binutils 2.35, whose assembler rejects `-mcpu=neoverse-v2` ("unknown architecture
+armv9-a+…"), so the job ran with gcc-toolset-14's binutils 2.41 first on `PATH`
+(`qsub -v PATH=…`; only binutils, not that toolset's GCC 14; `aarch64_tests.md`
+Prerequisites).
+
+| | `default` | `native` | `gnu` | `gnu-native` |
+|---|---|---|---|---|
+| dialect | `-std=c++23` | `-std=c++23`, `ARMV9_GRACE` | `-std=gnu++23` | `-std=gnu++23`, `ARMV9_GRACE` |
+| method / half `*` | 0 / through float (`fcvt`) | 16 / `fmul h…` | 0 / through float | 16 / `fmul h…` |
+| `std::float16_t` `256*256-65000` | 544 | inf | 544 | inf |
+| `std::complex<std::float16_t>` `(269,111.5)²` | (59936, 60000) | **(inf, 60000)** | (59936, 60000) | **(inf, 60000)** |
+| `Kokkos::complex<half_t>` `(269,111.5)²` | (59936, 60000) | (59936, 60000) | (59936, 60000) | (59936, 60000) |
+| warnings, 5 targets | 0 | 0 | 0 | 0 |
+| `*complex*:*atomic*` / `*numeric_traits*` / `*half*` | 25 / 15 / 14 | 25 / 15 / 14 | 25 / 15 / 14 | 25 / 15 / 14 |
+
+`/` gives (60000, 0) in all four. So Grace with `ARMV9_GRACE` behaves as Sapphire
+Rapids with `Kokkos_ARCH_SPR` (job 9117216): method 16, native half multiplication,
+libstdc++'s complex `*` overflows while Kokkos's stays in float, and every test passes
+unchanged. Note on the stand-alone check (`aarch64_tests.md` step 3): at `-O2`, GCC's
+default `-ffp-contract=fast` fuses `a * a - c` into a half `fmadd` (one rounding, no
+overflow), which prints 544 under method 16; with `-ffp-contract=off` it prints inf. The
+job's probes use the tests' Debug flags and do not contract.
 
 *Options added 2026-11-23:* `ENABLE_OPENMP=ON` also enables the OpenMP backend and
 builds and runs `Kokkos_CoreUnitTest_OpenMP_SmokeTest`/`OpenMP1` (separate build
@@ -2570,7 +2597,7 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | Locale branch of `half_io` | verification | any machine with `de_DE`/`fr_FR` UTF-8 locales |
 | ~~**GNU dialect** `-std=gnu++23`, Kokkos's default for GCC~~ | done 2026-11-23, job 9117216: same probe values and test results as strict `-std=c++23`, with and without native half (§8.2) | Aurora |
 | ~~**Declared but undefined cast functions** (the H18 pattern)~~ | done 2026-11-23: `half_cast_overloads`/`bhalf_cast_overloads` pass on the std backend (job 9117216, four builds) and on CUDA (job 10404595); none missing. HIP/SYCL: run the same tests there (§8.3, §8.4) | Aurora, A100; HIP/SYCL pending |
-| aarch64 with native half arithmetic: `Kokkos_ARCH_ARMV9_GRACE` (`-mcpu=neoverse-v2`); Grace's Neoverse V2 has the Arm FP16 extension (`fphp`/`asimdhp`), so GCC should evaluate `_Float16` in half (method 16), unlike the default target of job 4260499 (method 0). Expect the Sapphire Rapids probe results | planned 2026-11-23: `run_std_half_fp16.sh` now detects aarch64 (native build `ARMV9_GRACE`, CPU flag `fphp`, `fmul h…` vs `fcvt s…, h…`); `run_std_half_fp16_grace.sh` is the PBS wrapper for the Grace machine (`regular-g`, `cmake/3.31.1 gcc/15.2.0`). If the CPU lacks `fphp`, the native builds are built but not run, and this becomes future work | Grace machine (the only aarch64 one, GCC 15) |
+| ~~aarch64 with native half arithmetic: `Kokkos_ARCH_ARMV9_GRACE` (`-mcpu=neoverse-v2`)~~ | done 2026-11-23, job 4264666: Neoverse V2 has `fphp`/`asimdhp`; the native builds evaluate `_Float16` in half (method 16, `fmul h…`), with the Sapphire Rapids probe results (libstdc++ `(269,111.5)²` = (inf, 60000), Kokkos (59936, 60000)); all four builds 0 warnings, 25 / 15 / 14 tests pass. Needs binutils ≥ 2.41 on `PATH` (the module's 2.35 rejects armv9-a) (§8.2, `aarch64_tests.md`) | Grace machine |
 | ~~Numeric traits of `half_t`/`bhalf_t` against `std::numeric_limits<std::float16_t/bfloat16_t>`~~ | done 2026-11-23: `numeric_traits_half_vs_std_numeric_limits` passes in all four builds (job 9117303) and in `default`/`gnu-native` with OpenMP (job 9117309); all traits agree | GCC ≥ 13 |
 | ~~Stream I/O of `half_t`/`bhalf_t` against libstdc++'s `std::float16_t`/`std::bfloat16_t` extractor and inserter~~ | done 2026-11-23: `half_io_vs_std`/`bhalf_io_vs_std` pass in all four builds (job 9117303) and with OpenMP (job 9117309); Kokkos matches libstdc++ for every compared input and format. Not compared: sentry failures, where libstdc++ deviates from C++23 (§8.2) | GCC ≥ 13 |
 | Report the libstdc++ extraction deviation (sentry failure assigns an uninitialized float; GCC 14, 15, master) to GCC | optional, external | — |

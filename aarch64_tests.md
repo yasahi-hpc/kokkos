@@ -20,6 +20,21 @@ Steps 1-3 take a few minutes and need no Kokkos build. Step 4 is the full test j
   `grep -c ARMV9_GRACE run_std_half_fp16.sh` (expect 2 or more). The examples use the
   checkout of job 4260499, `/home/i18048/jh220036/develop/complex/kokkos`.
 - **Modules:** `cmake/3.31.1 gcc/15.2.0`.
+- **Assembler (found 2026-11-23):** `gcc/15.2.0` uses the system binutils 2.35
+  (`/usr/bin/as`), which rejects `-mcpu=neoverse-v2`: "Error: unknown architecture
+  `armv9-a+rng+crc+i8mm+bf16+sve2-bitperm+memtag+profile'". Use binutils 2.41 from
+  gcc-toolset-14, but **only its binutils**: prepending
+  `/opt/rh/gcc-toolset-14/root/usr/bin` would also put its `g++` (GCC 14) ahead of
+  GCC 15. A directory of symlinks does it (made once, on the shared file system):
+
+  ```bash
+  B=/home/i18048/jh220036/develop/complex/aarch64_checks/binutils241
+  mkdir -p $B
+  for t in as ld ld.bfd objdump nm ar ranlib strip readelf objcopy; do
+    ln -sf /opt/rh/gcc-toolset-14/root/usr/bin/$t $B/$t
+  done
+  export PATH=$B:$PATH   # after `module load`; `as --version` should say 2.41
+  ```
 - **Where to run:** steps 1 and 3 must run **on a compute node**. The login node may be a
   different CPU, and a program built for Neoverse V2 crashes with "Illegal
   instruction" on a CPU without FP16. Use an interactive job, for example
@@ -88,16 +103,19 @@ int main() {
 }
 ```
 
-Build and run on a compute node:
+Build and run on a compute node, with the binutils 2.41 directory on `PATH`
+(Prerequisites). `-ffp-contract=off` keeps `a * a - c` as two operations; without it
+GCC fuses them at `-O2` (see the note below the table):
 
 ```bash
-g++ -std=c++23 -O2 -o fp16_default fp16_check.cpp
-g++ -std=c++23 -O2 -mcpu=neoverse-v2 -o fp16_native fp16_check.cpp
+g++ -std=c++23 -O2 -ffp-contract=off -o fp16_default fp16_check.cpp
+g++ -std=c++23 -O2 -ffp-contract=off -mcpu=neoverse-v2 -o fp16_native fp16_check.cpp
 ./fp16_default
 ./fp16_native
 # The instructions of mul(): native half (fmul h0, h0, h1) or through float (fcvt).
+# GCC 15 mangles mul(std::float16_t, std::float16_t) as _Z3mulDF16_DF16_.
 for e in fp16_default fp16_native; do
-  echo "== $e"; objdump -d --no-show-raw-insn "$e" | sed -n '/<_Z3mulDF16_S_>:/,/ret/p'
+  echo "== $e"; objdump -d --no-show-raw-insn "$e" | sed -n '/<_Z3mulDF16_DF16_>:/,/ret/p'
 done
 ```
 
@@ -107,6 +125,14 @@ Expected:
 |---|---|---|
 | output | `eval method 0: 256*256-65000 = 544, (269,111.5)^2 = (59936, 60000)` | `eval method 16: 256*256-65000 = inf, (269,111.5)^2 = (inf, 60000)` |
 | `mul()` | `fcvt s…, h…` twice, `fmul s…`, `fcvt h…, s…` | `fmul h0, h0, h1` |
+
+*Contraction (found 2026-11-23):* without `-ffp-contract=off`, `fp16_native` prints
+`256*256-65000 = 544`. GCC's default for C++, also with `-std=c++23`, is
+`-ffp-contract=fast`, and it compiles `a * a - c` to one half `fmadd`: the product
+is exact, there is only one rounding, so nothing overflows. That is not float
+evaluation: `mul()` is still `fmul h0, h0, h1`, and the complex square still overflows.
+The Kokkos job (step 4) is not affected: its probes use the tests' Debug flags, which do
+not contract.
 
 What it shows:
 
@@ -123,8 +149,13 @@ From the Kokkos checkout on Grace:
 
 ```bash
 cd /home/i18048/jh220036/develop/complex/kokkos
-qsub run_std_half_fp16_grace.sh
+B=/home/i18048/jh220036/develop/complex/aarch64_checks/binutils241   # Prerequisites
+qsub -v "PATH=$B:$PATH" run_std_half_fp16_grace.sh
 ```
+
+Without the binutils directory on the job's `PATH`, the native builds fail with the
+assembler error above. The wrapper's `module purge`/`module load` keep it: they only
+remove and add the modules' own entries, and `gcc/15.2.0`'s `bin` has no `as`.
 
 - **What it runs:** four builds, each Serial, Debug, C++23:
   - `default`: no `Kokkos_ARCH`, strict `-std=c++23`;
@@ -158,10 +189,47 @@ What to look for in `job.out`:
 Then send me the log directory, or copy it to the Aurora/A100 side as before, and I'll
 record it in `complex_half.md`.
 
+## Results (2026-11-23): all as expected
+
+Recorded in `complex_half.md` §8.2 ("Grace run") and §8.5. Scripts and outputs of
+steps 1-3: `/home/i18048/jh220036/develop/complex/aarch64_checks/`.
+
+1. **CPU (job 4264402, `mg0837`):** Neoverse-V2, with `fphp` and `asimdhp`. The login
+   node `miyabi-g3` is also a Neoverse-V2 with both flags.
+2. **GCC 15.2.0 macros:** exactly as in the table: method 0 without a flag; 16 and
+   `__ARM_FEATURE_FP16_SCALAR_ARITHMETIC 1` with `-mcpu=neoverse-v2`.
+3. **Small program:**
+   - job 4264413, as first written: the native build failed in the assembler
+     (binutils 2.35);
+   - job 4264540, binutils 2.41, no `-ffp-contract=off`: default
+     `eval method 0: 544, (59936, 60000)`, `mul()` = `fcvt`, `fcvt`, `fmul s0`, `fcvt`;
+     native `eval method 16: 544, (inf, 60000)`, `mul()` = `fmul h0, h0, h1`. The 544
+     is the half `fmadd`;
+   - job 4264624, native with `-ffp-contract=off`:
+     `eval method 16: inf, (inf, 60000)`, `fmul h0, h0, h1`.
+4. **Test job 4264666** (`mg0639`, commit `48e69227b`, binutils 2.41 on `PATH`): every
+   row of the table above holds:
+
+   | | `default`, `gnu` | `native`, `gnu-native` |
+   |---|---|---|
+   | method | 0 | 16 (+ `__ARM_FEATURE_FP16_SCALAR_ARITHMETIC 1`) |
+   | half `*` instructions, native / through float | 0 / 4 | 2 / 0 |
+   | `std_float16_t 256*256-65000` | 544 | inf |
+   | `std_complex (269,111.5)^2` | (59936, 60000) | (inf, 60000) |
+   | `kokkos_complex (269,111.5)^2` | (59936, 60000) | (59936, 60000) |
+   | `(60000,60000)/(1,1)`, both | (60000, 0) | (60000, 0) |
+   | warnings, 5 targets | 0 | 0 |
+   | tests | 25 / 15 / 14 pass | 25 / 15 / 14 pass |
+
+   Logs: `std_half_fp16_logs.4264666/` in the checkout.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
+| `Error: unknown architecture 'armv9-a+…'` / `unrecognized option -march=armv9-a…` (native builds or `fp16_native`) | The system assembler (binutils 2.35) is too old for Neoverse V2. Put binutils 2.41 first on `PATH` (Prerequisites), and pass it to the job with `qsub -v "PATH=…"`. |
+| `objdump … sed` prints nothing for `mul()` | The symbol is `_Z3mulDF16_DF16_` with GCC 15; check with `nm fp16_default \| grep mul`. |
+| `fp16_native` prints method 16 but `256*256-65000 = 544` | Floating-point contraction (`fmadd` in half); compile with `-ffp-contract=off` (step 3). |
 | `fp16 cpu: no` and `NOT RUN (CPU lacks fphp)` for the native builds | The compute node has no FP16; check `lscpu` there (step 1). If so, the task becomes future work. |
 | `ERROR: no GCC >= 13 found` or `module load ... failed` | The module names differ; check `module avail gcc cmake`, then edit the `module load` line of `run_std_half_fp16_grace.sh`. |
 | `Kokkos did not select the std half backend` | The compiler does not define `__STDCPP_FLOAT16_T__` with `-std=c++23`; check step 2. |
