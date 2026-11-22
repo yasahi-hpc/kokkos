@@ -1786,6 +1786,24 @@ so there is no include cycle.
   constructor/operator and through the cast functions, on host and device: 0, −0, 0.5,
   −2, 1e-3, the smallest subnormal, ±inf, NaN. The existing conversion tests loop over
   the arithmetic types but skip `bool`, which is why H17 went unnoticed.
+- **New gap (H18), std backend, found 2026-11-22 (Aurora, job 9116988); fixed, not yet
+  verified on the std backend.** `Kokkos_Half_FloatingPointWrapper.hpp:79,147` declare
+  `cast_to_half(half_t)` and `cast_to_bhalf(bhalf_t)`; CUDA, HIP and SYCL define them
+  (identity), `Kokkos_STD_Half_Conversion.hpp` did not. They are reached by the
+  template `floating_point_wrapper::operator=(T)` (through `cast_to_wrapper`) for a `T`
+  that converts to the half type, e.g. a numeric-trait constant:
+  `h = Kokkos::infinity<half_t>::value;`. GCC 14 then warns "inline function
+  `cast_to_bhalf(bhalf_t)` used but never defined", and the program cannot link.
+  Copy- and direct-initialization take another path (the `bit_comparison_type`
+  constructor), so the existing tests never hit it. Pre-existing, not from this branch.
+  - **Fix:** define both identity overloads in `Kokkos_STD_Half_Conversion.hpp`, as the
+    other backends do.
+  - **Test:** `half_assign_trait_constants` / `bhalf_assign_trait_constants` in
+    `TestHalfConversion.hpp` (`Kokkos_CoreUnitTest_Default`, in the `*half*` filter):
+    assign `infinity`, `epsilon`, `finite_max`, `norm_min` on the host and in a kernel,
+    and compare the bits with direct initialization. Passes where `half_t` is `float`
+    (GCC 12 host trial, 10/10 `*half*`); the std-backend run is
+    `run_std_half_fp16.sh` on Aurora.
 
 **CH2. Explicit narrowing into half (C6, D4).** `explicit(bool)` on the converting ctor,
 explicit only for conversions *into* half types. Tests:
@@ -2257,8 +2275,33 @@ twice). Each initializes a `bhalf_t` from a numeric-trait constant
 (`infinity`/`epsilon`/`finite_max`… of `bhalf_t`, a `BitComparisonWrapper`). That goes
 through `floating_point_wrapper(bit_comparison_type)`, which copies the bits with
 `Kokkos::bit_cast` (`memcpy`), so there is no value conversion, and the values are
-checked by the passing tests. Why GCC reports them is not known (GCC 12 here lacks the
-warning; a reproducer on Aurora would tell). Status: harmless, test-only, open.
+checked by the passing tests. Status: **harmless false positives; no library change.**
+
+*Cause, from `run_bf16_warning_probe.sh` (PBS job 9116988, GCC 14.2, Xeon Max).* The
+script compiles 10 small cases under four flag sets (none, `-mavx512bf16`,
+`-mavx512fp16`, `-march=sapphirerapids`) and counts the warning:
+
+| case | code | warnings (none / bf16 / fp16 / spr) |
+|---|---|---|
+| M1 | struct{`uint16_t`} → struct{`__bf16`}, copy-init through a constructor | 0 / 1 / 0 / 1 |
+| M2 | the same, direct-init | 0 / 0 / 0 / 0 |
+| M3 | copy-init from a 4-byte struct | 0 / 0 / 0 / 0 |
+| M4 | `short` → `std::bfloat16_t` (the case fixed in `3c70cfdca`) | 0 / 2 / 0 / 2 |
+| M5 | `float` → `std::bfloat16_t` | 0 / 0 / 0 / 0 |
+| K1 | `bhalf_t x = infinity<bhalf_t>::value;` (the test lines) | 0 / 1 / 0 / 1 |
+| K2 | `bhalf_t x(infinity<bhalf_t>::value);` | 0 / 0 / 0 / 0 |
+| K3 | `x = infinity<bhalf_t>::value;` | 0 / 0 / 0 / 0, but see H18 |
+| K4 | `half_t x = infinity<half_t>::value;` | 0 / 0 / 0 / 0 |
+| K5 | `bhalf_t(short(1))` (after `3c70cfdca`) | 0 / 0 / 0 / 0 |
+
+So GCC warns whenever BF16 is enabled and a copy-initialization converts between a
+2-byte struct holding a `uint16_t` (`BitComparisonWrapper`) and one holding a `__bf16`
+(`bhalf_t`), although the constructor only copies bits: it treats the two structs like
+`short` and `__bf16`. Direct initialization does not convert and stays silent. User code
+`bhalf_t x = Kokkos::infinity_v<bhalf_t>;` gets the same warning with
+`-march=sapphirerapids`; `bhalf_t x(Kokkos::infinity_v<bhalf_t>);` avoids it. Not
+explained: why the conversion inside `operator=(T)` (K3) does not warn. K3 instead
+showed H18 ("`cast_to_bhalf(bhalf_t)` used but never defined").
 
 *Validation of committed work* (first done by the run above; the points below all
 passed there):
@@ -2357,7 +2400,8 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~Validation of A1-A7, B1-B3, CH1-CH3, H17 with the std half backend~~ | done 2026-11-22, job 4260499: 25 + 14 + 8 tests pass, 0 warnings (GCC 15, aarch64; Serial only) | GCC ≥ 13, C++23 (§8.2) |
 | ~~`std::complex<half_t>` interop with libstdc++ ≥ 13 (half-complex.md §3.2)~~ | done 2026-11-22, job 4260499 (GCC 15; 13/14 not run); no further work (§8.2, A8) | GCC ≥ 13 |
 | ~~D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision~~ | done 2026-11-22 (jobs 4260499, 9116902, 9116933): float except `*` under method 16, where libstdc++ overflows and Kokkos does not; optional: functions over the `ch3acc` inputs | GCC ≥ 13 |
-| Remaining 7 `__bfloat16` warnings at test lines (`-march=sapphirerapids`) | open, harmless (bit copies; tests pass); cause unknown | GCC ≥ 13 on Aurora (reproducer) |
+| ~~Remaining 7 `__bfloat16` warnings at test lines (`-march=sapphirerapids`)~~ | done 2026-11-22, job 9116988: GCC false positive on struct-to-struct bit copies; harmless, no change (§8.2) | GCC ≥ 13 on Aurora |
+| H18: `cast_to_half(half_t)`/`cast_to_bhalf(bhalf_t)` missing on the std backend | fixed, test added; verify with `run_std_half_fp16.sh` (`*half*` now 10 tests) | GCC ≥ 13 |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
 | B4a: `constexpr` half, std backend | future work | GCC ≥ 13 |

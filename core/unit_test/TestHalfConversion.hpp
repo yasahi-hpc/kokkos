@@ -158,6 +158,58 @@ inline void test_bhalf_bool_cast_functions() {
   EXPECT_EQ(errors, 0);
 }
 
+// Assigning a numeric-trait constant (a BitComparisonWrapper where H is a half
+// type) goes through floating_point_wrapper::operator=(T), which needs
+// cast_to_half(half_t)/cast_to_bhalf(bhalf_t); the std backend lacked them, so
+// this failed to link. The result must have the bits of the constant.
+template <class H>
+void test_half_assign_trait_constants() {
+  using Bits = std::conditional_t<sizeof(H) == 2, std::uint16_t, std::uint32_t>;
+  constexpr int n = 4;
+  // Reference: direct initialization, which takes the constant's bits as is.
+  const H ref[n] = {H(Kokkos::infinity<H>::value), H(Kokkos::epsilon<H>::value),
+                    H(Kokkos::finite_max<H>::value),
+                    H(Kokkos::norm_min<H>::value)};
+  auto assign    = [](int i) {
+    H x;
+    switch (i) {
+      case 0: x = Kokkos::infinity<H>::value; break;
+      case 1: x = Kokkos::epsilon<H>::value; break;
+      case 2: x = Kokkos::finite_max<H>::value; break;
+      default: x = Kokkos::norm_min<H>::value; break;
+    }
+    return x;
+  };
+  for (int i = 0; i < n; ++i) {
+    EXPECT_EQ(Kokkos::bit_cast<Bits>(assign(i)), Kokkos::bit_cast<Bits>(ref[i]))
+        << i;
+  }
+
+  using MemorySpace = typename TEST_EXECSPACE::memory_space;
+  Kokkos::View<H[n], MemorySpace> out("out");
+  Kokkos::parallel_for(
+      "TestHalfAssignTraitConstants", Kokkos::RangePolicy<TEST_EXECSPACE>(0, 1),
+      KOKKOS_LAMBDA(int) {
+        out(0) = Kokkos::infinity<H>::value;
+        out(1) = Kokkos::epsilon<H>::value;
+        out(2) = Kokkos::finite_max<H>::value;
+        out(3) = Kokkos::norm_min<H>::value;
+      });
+  auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+  for (int i = 0; i < n; ++i) {
+    EXPECT_EQ(Kokkos::bit_cast<Bits>(h_out(i)), Kokkos::bit_cast<Bits>(ref[i]))
+        << i;
+  }
+}
+
+TEST(TEST_CATEGORY, half_assign_trait_constants) {
+  test_half_assign_trait_constants<Kokkos::Experimental::half_t>();
+}
+
+TEST(TEST_CATEGORY, bhalf_assign_trait_constants) {
+  test_half_assign_trait_constants<Kokkos::Experimental::bhalf_t>();
+}
+
 TEST(TEST_CATEGORY, half_bool_conversion) {
   test_half_bool_conversion<Kokkos::Experimental::half_t>(0x1p-24f);
   test_half_bool_cast_functions();

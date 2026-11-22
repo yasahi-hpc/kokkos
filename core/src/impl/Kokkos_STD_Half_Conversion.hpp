@@ -30,6 +30,10 @@ inline half_t cast_to_half(long long val) { return half_t::impl_type(val); }
 inline half_t cast_to_half(unsigned long long val) {
   return half_t::impl_type(val);
 }
+// Declared in Kokkos_Half_FloatingPointWrapper.hpp and defined by every other
+// backend; reached by floating_point_wrapper::operator=(T) for T convertible to
+// half_t, e.g. a numeric-trait constant: h = Kokkos::infinity<half_t>::value.
+inline half_t cast_to_half(half_t val) { return val; }
 
 // cast_from_half
 template <typename T>
@@ -119,6 +123,8 @@ inline bhalf_t cast_to_bhalf(long long val) { return bhalf_t::impl_type(val); }
 inline bhalf_t cast_to_bhalf(unsigned long long val) {
   return bhalf_t::impl_type(val);
 }
+// See cast_to_half(half_t).
+inline bhalf_t cast_to_bhalf(bhalf_t val) { return val; }
 
 // cast_from_bhalf
 template <typename T>
