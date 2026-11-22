@@ -2235,6 +2235,28 @@ float and half evaluation (`std::float16_t` scalar, `std::complex<std::float16_t
 `-std=` flag and `__STRICT_ANSI__`), so `CONFIGS` defaults to
 `default native gnu gnu-native`; a build now fails on GCC's "used but never defined".
 
+*Four-build run (PBS job 9117216, 2026-11-23, commit `417e5844d`): all pass.* Aurora,
+GCC 14.2, Xeon Max 9470C:
+
+| | `default` | `native` | `gnu` | `gnu-native` |
+|---|---|---|---|---|
+| dialect | `-std=c++23` (`__STRICT_ANSI__`) | `-std=c++23` | `-std=gnu++23` | `-std=gnu++23` |
+| method / half `*` | 0 / through float | 16 / `vmulsh` | 0 / through float | 16 / `vmulsh` |
+| warnings, 5 targets | 0 | 0 | 0 | 0 |
+| "used but never defined" | none | none | none | none |
+| `*complex*:*atomic*` / `*numeric_traits*` / `*half*` | 25 / 14 / 12 | 25 / 14 / 12 | 25 / 14 / 12 | 25 / 14 / 12 |
+
+- **GNU dialect:** the probe values equal the strict builds' line for line
+  (`std::float16_t` `256*256-65000`: 544 under method 0, inf under 16;
+  `std::complex<std::float16_t>` `(269,111.5)²`: (59936, 60000) / (inf, 60000);
+  Kokkos (59936, 60000) in all four), and all tests pass. So the different
+  `-fexcess-precision` default of GNU mode changes nothing for these expressions and
+  tests; that is the extent of the check, not a proof for every half expression.
+- **Declared casts:** `half_cast_overloads` and `bhalf_cast_overloads` pass in all four
+  builds, and no build reports "used but never defined". Every cast declared in
+  `Kokkos_Half_FloatingPointWrapper.hpp`, and every wrapper operation that reaches one,
+  is defined on the std backend: H18 was the only gap of its kind.
+
 *Run on Aurora (PBS job 9116902, 2026-11-22): all tests pass.* Xeon Max 9470C
 (`avx512_fp16`), GCC 14.2.0, commit `b5d91eb67`, Debug, Serial:
 
@@ -2486,8 +2508,8 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | B4b-HIP (and CH5 on HIP) | future work, needs a workaround | AMD GPU |
 | B4b-SYCL (and CH5 on SYCL) | future work | Intel GPU (compile-time checks also here) |
 | Locale branch of `half_io` | verification | any machine with `de_DE`/`fr_FR` UTF-8 locales |
-| **GNU dialect** `-std=gnu++23`: Kokkos's default for GCC when `CMAKE_CXX_EXTENSIONS` is unset (`cmake/kokkos_test_cxx_std.cmake`); every GCC ≥ 13 run so far used strict `-std=c++23`. GNU mode changes GCC's `-fexcess-precision` default, so half expressions may round differently | verification (proposed 2026-11-23) | Aurora: `run_std_half_fp16.sh` configs `gnu`, `gnu-native` |
-| **Declared but undefined cast functions** (the H18 pattern): every `cast_to_half`/`cast_from_half`/`cast_to_bhalf`/`cast_from_bhalf` overload declared in `Kokkos_Half_FloatingPointWrapper.hpp`, and the wrapper operations that reach them | verification; test `half_cast_overloads`/`bhalf_cast_overloads` added (2026-11-23; passes on CUDA, A100 job 10404595, host and device); builds fail on "used but never defined" | Aurora: `run_std_half_fp16.sh` (`*half*`); also CUDA/HIP/SYCL |
+| ~~**GNU dialect** `-std=gnu++23`, Kokkos's default for GCC~~ | done 2026-11-23, job 9117216: same probe values and test results as strict `-std=c++23`, with and without native half (§8.2) | Aurora |
+| ~~**Declared but undefined cast functions** (the H18 pattern)~~ | done 2026-11-23: `half_cast_overloads`/`bhalf_cast_overloads` pass on the std backend (job 9117216, four builds) and on CUDA (job 10404595); none missing. HIP/SYCL: run the same tests there (§8.3, §8.4) | Aurora, A100; HIP/SYCL pending |
 | aarch64 with native half arithmetic (`Kokkos_ARCH_ARMV9_GRACE` or another FP16 `-mcpu`): expect method 16 and the Sapphire Rapids probe results | verification (proposed) | GCC 15 aarch64 machine: `run_std_half_gcc13.sh` with an arch option |
 | Numeric traits of `half_t`/`bhalf_t` against `std::numeric_limits<std::float16_t/bfloat16_t>`, bit for bit | verification (proposed); so far checked only against hand-written IEEE values | GCC ≥ 13 |
 | Stream I/O of `half_t`/`bhalf_t` against libstdc++'s `std::float16_t`/`std::bfloat16_t` extractor and inserter (values and stream state: out of range, `"x"`, empty, rounding) | verification of the B2 revision (proposed) | GCC ≥ 13 |
