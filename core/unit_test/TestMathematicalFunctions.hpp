@@ -2962,9 +2962,9 @@ struct TestNextAfterHalf {
     const FP16Type neg_zero     = Kokkos::bit_cast<FP16Type>(FP16_NEG_ZERO);
     const FP16Type pos_smallest = Kokkos::bit_cast<FP16Type>(FP16_SMALLEST_POS);
     const FP16Type neg_smallest = Kokkos::bit_cast<FP16Type>(FP16_SMALLEST_NEG);
-    const FP16Type pos_max      = finite_max<FP16Type>::value;
-    const FP16Type neg_max      = finite_min<FP16Type>::value;
-    const FP16Type pos_inf      = infinity<FP16Type>::value;
+    const FP16Type pos_max(finite_max<FP16Type>::value);
+    const FP16Type neg_max(finite_min<FP16Type>::value);
+    const FP16Type pos_inf(infinity<FP16Type>::value);
     const FP16Type neg_inf = -static_cast<FP16Type>(infinity<FP16Type>::value);
 
     // NaN Handling

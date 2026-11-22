@@ -1786,8 +1786,12 @@ so there is no include cycle.
   constructor/operator and through the cast functions, on host and device: 0, −0, 0.5,
   −2, 1e-3, the smallest subnormal, ±inf, NaN. The existing conversion tests loop over
   the arithmetic types but skip `bool`, which is why H17 went unnoticed.
-- **New gap (H18), std backend, found 2026-11-22 (Aurora, job 9116988); fixed, not yet
-  verified on the std backend.** `Kokkos_Half_FloatingPointWrapper.hpp:79,147` declare
+- **New gap (H18), std backend, found 2026-11-22 (Aurora, job 9116988); fixed and
+  verified on the std backend (Aurora, job 9117024, `run_h18_std_half.sh`: GCC 14.2,
+  with and without `Kokkos_ARCH_SPR`, the assignment program links with no undefined
+  `cast_to_half`/`cast_to_bhalf`, its bits equal direct initialization: half_t
+  `0x7c00 0x1400 0x7bff 0x0400`, bhalf_t `0x7f80 0x3c00 0x7f7f 0x0080` for
+  infinity/epsilon/finite_max/norm_min; `*half*` 10/10).** `Kokkos_Half_FloatingPointWrapper.hpp:79,147` declare
   `cast_to_half(half_t)` and `cast_to_bhalf(bhalf_t)`; CUDA, HIP and SYCL define them
   (identity), `Kokkos_STD_Half_Conversion.hpp` did not. They are reached by the
   template `floating_point_wrapper::operator=(T)` (through `cast_to_wrapper`) for a `T`
@@ -2303,6 +2307,63 @@ So GCC warns whenever BF16 is enabled and a copy-initialization converts between
 explained: why the conversion inside `operator=(T)` (K3) does not warn. K3 instead
 showed H18 ("`cast_to_bhalf(bhalf_t)` used but never defined").
 
+*The warning in detail (seen again in job 9117024, `native` build).*
+
+```text
+core/unit_test/TestHalfOperators.hpp: In instantiation of 'void Test::_test_half_operators(half_type, half_type)
+    [with half_type = Kokkos::Experimental::Impl::floating_point_wrapper<__bf16>]':
+core/unit_test/TestHalfOperators.hpp:1035:34:   required from here
+core/unit_test/TestHalfOperators.hpp:972:13: warning: '__bfloat16' is redefined from typedef 'short'
+    to real '__bf16' since GCC 13.1, be careful of implicit conversion between '__bf16' and 'short';
+    an explicit bitcast may be needed here
+```
+
+- **Source line:** `half_type epsilon = Kokkos::epsilon<half_type>::value;` in
+  `_test_half_operators<bhalf_t>`. Job 9117024 rebuilt only `Kokkos_CoreUnitTest_Default`,
+  so only this one of the 7 appeared; the other sites are in `Kokkos_CoreUnitTest_Serial1`
+  and `..._SmokeTest`.
+- **All 7 have the same form**, a copy-initialization of `bhalf_t` from a trait constant:
+
+  | site | code |
+  |---|---|
+  | `TestHalfOperators.hpp:972` | `half_type epsilon = Kokkos::epsilon<half_type>::value;` |
+  | `TestNumericTraits.hpp:114` (twice: two instantiations) | `T const inf = infinity<T>::value;` |
+  | `TestNumericTraits.hpp:123` | `T const eps = epsilon<T>::value;` |
+  | `TestMathematicalFunctions.hpp:2965` | `const FP16Type pos_max = finite_max<FP16Type>::value;` |
+  | `TestMathematicalFunctions.hpp:2966` | `const FP16Type neg_max = finite_min<FP16Type>::value;` |
+  | `TestMathematicalFunctions.hpp:2967` | `const FP16Type pos_inf = infinity<FP16Type>::value;` |
+  | `TestReduce.hpp:789` | `ScalarType inf = Kokkos::infinity_v<ScalarType>;` |
+
+- **When it appears:** GCC ≥ 13, `bhalf_t` on the std backend (`std::bfloat16_t`), and
+  BF16 instructions enabled (`-mavx512bf16`, or `-march=sapphirerapids` through
+  `Kokkos_ARCH_SPR`). Never for `half_t`, nor without BF16.
+- **What it means here:** nothing. The conversion is
+  `BitComparisonWrapper` → `bhalf_t` through
+  `floating_point_wrapper(bit_comparison_type)`, which copies the bits
+  (`Kokkos::bit_cast`, `memcpy`). GCC sees a 2-byte struct holding a `uint16_t` converted
+  into a 2-byte struct holding a `__bf16`, and treats it like the `short` → `__bf16`
+  conversion it is meant to catch. The values are right: the IEEE bit patterns are
+  checked by `numeric_traits_*` and, since H18, by `bhalf_assign_trait_constants`.
+
+*Ways to suppress it* (checked 2026-11-22):
+
+| option | works? | cost |
+|---|---|---|
+| `-Wno-…` flag or `#pragma GCC diagnostic ignored` | **no**: GCC emits it with no option name (no `[-W…]` tag in the message), so neither can target it | — |
+| `-w` | yes | silences every warning; not acceptable |
+| **Direct-initialize at the 6 test lines**: `T const inf(infinity<T>::value);` | **yes** (probe K2: silent under all four flag sets) | 6 one-line test edits; same value, same code path (the `bit_comparison_type` constructor) |
+| Library: make `BitComparisonWrapper` not look like a 2-byte integer, e.g. 4 bytes with padding (probe M3: silent), and bit-cast `rhs.value` in the constructor | likely, also for user code | changes an `Impl` type's size; needs a check on all backends (CUDA/HIP/SYCL device code uses it). Not worth it for a false positive |
+| Library: an explicit constructor or a conversion operator instead | no / breaks code | `explicit` would break `bhalf_t x = infinity_v<bhalf_t>;` in user code; adding a conversion operator makes copy-initialization ambiguous |
+
+**Recommendation:** the test-side change only, i.e. direct initialization at the 6
+lines. That removes the warning from the Kokkos build and tests nothing less. Leave the
+library as is. User code with `bhalf_t x = Kokkos::infinity_v<bhalf_t>;` under
+`-march=sapphirerapids` will see the same harmless warning, and
+`bhalf_t x(Kokkos::infinity_v<bhalf_t>);` avoids it. **Applied 2026-11-22** at the 6
+lines (the table above shows the old code). Built and run here where `half_t` is
+`float`, and compiled for CUDA (A100 build); to verify on Aurora with
+`run_std_half_fp16.sh` (`native` build: expect 0 warnings).
+
 *Validation of committed work* (first done by the run above; the points below all
 passed there):
 - **All tests in §8.1.** Particular points:
@@ -2401,7 +2462,8 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~`std::complex<half_t>` interop with libstdc++ ≥ 13 (half-complex.md §3.2)~~ | done 2026-11-22, job 4260499 (GCC 15; 13/14 not run); no further work (§8.2, A8) | GCC ≥ 13 |
 | ~~D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision~~ | done 2026-11-22 (jobs 4260499, 9116902, 9116933): float except `*` under method 16, where libstdc++ overflows and Kokkos does not; optional: functions over the `ch3acc` inputs | GCC ≥ 13 |
 | ~~Remaining 7 `__bfloat16` warnings at test lines (`-march=sapphirerapids`)~~ | done 2026-11-22, job 9116988: GCC false positive on struct-to-struct bit copies; harmless, no change (§8.2) | GCC ≥ 13 on Aurora |
-| H18: `cast_to_half(half_t)`/`cast_to_bhalf(bhalf_t)` missing on the std backend | fixed, test added; verify with `run_std_half_fp16.sh` (`*half*` now 10 tests) | GCC ≥ 13 |
+| ~~H18: `cast_to_half(half_t)`/`cast_to_bhalf(bhalf_t)` missing on the std backend~~ | done: fixed `1220b11de`, verified on Aurora (job 9117024); CUDA run: job 10404035 | GCC ≥ 13 |
+| Direct-initialize the 6 test lines that trigger the `__bfloat16` false positive | applied (§8.2); verify with `run_std_half_fp16.sh` `native` (expect 0 warnings) | GCC ≥ 13 on Aurora |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
 | B4a: `constexpr` half, std backend | future work | GCC ≥ 13 |
