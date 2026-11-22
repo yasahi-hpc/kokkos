@@ -2280,7 +2280,10 @@ Serial. The builds need binutils ≥ 2.41: the `gcc/15.2.0` module uses the syst
 binutils 2.35, whose assembler rejects `-mcpu=neoverse-v2` ("unknown architecture
 armv9-a+…"), so the job ran with gcc-toolset-14's binutils 2.41 first on `PATH`
 (`qsub -v PATH=…`; only binutils, not that toolset's GCC 14; `aarch64_tests.md`
-Prerequisites).
+Prerequisites). Since then `run_std_half_fp16_grace.sh` does this itself: if the
+assembler cannot compile `-mcpu=neoverse-v2`, it puts a symlink directory to the newest
+gcc-toolset binutils that can first on `PATH` (override: `BINUTILS_DIR`); checked with
+a plain `qsub` (job 4265289, `CONFIGS=native`).
 
 | | `default` | `native` | `gnu` | `gnu-native` |
 |---|---|---|---|---|

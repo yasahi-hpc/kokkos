@@ -149,13 +149,17 @@ From the Kokkos checkout on Grace:
 
 ```bash
 cd /home/i18048/jh220036/develop/complex/kokkos
-B=/home/i18048/jh220036/develop/complex/aarch64_checks/binutils241   # Prerequisites
-qsub -v "PATH=$B:$PATH" run_std_half_fp16_grace.sh
+qsub run_std_half_fp16_grace.sh
 ```
 
-Without the binutils directory on the job's `PATH`, the native builds fail with the
-assembler error above. The wrapper's `module purge`/`module load` keep it: they only
-remove and add the modules' own entries, and `gcc/15.2.0`'s `bin` has no `as`.
+The wrapper handles the assembler itself (added 2026-11-23, after job 4264666): if the
+assembler on `PATH` cannot compile `-mcpu=neoverse-v2`, it makes a temporary directory
+of symlinks to the binutils of the newest gcc-toolset (15, 14, 13) that can, and puts
+it first on `PATH`. The top of the job output shows the choice, e.g.
+`assembler: …/binutils-gcc-toolset-14.XXXXXX/as: GNU assembler version 2.41-3.el9` and
+`assembler: -mcpu=neoverse-v2 ok`. `qsub -v BINUTILS_DIR=<dir>` names a directory
+instead. Job 4264666 predates this and was submitted with
+`qsub -v "PATH=<binutils241 dir>:$PATH"`, which works too.
 
 - **What it runs:** four builds, each Serial, Debug, C++23:
   - `default`: no `Kokkos_ARCH`, strict `-std=c++23`;
@@ -227,7 +231,7 @@ steps 1-3: `/home/i18048/jh220036/develop/complex/aarch64_checks/`.
 
 | Symptom | Cause and fix |
 |---|---|
-| `Error: unknown architecture 'armv9-a+…'` / `unrecognized option -march=armv9-a…` (native builds or `fp16_native`) | The system assembler (binutils 2.35) is too old for Neoverse V2. Put binutils 2.41 first on `PATH` (Prerequisites), and pass it to the job with `qsub -v "PATH=…"`. |
+| `Error: unknown architecture 'armv9-a+…'` / `unrecognized option -march=armv9-a…` (native builds or `fp16_native`) | The system assembler (binutils 2.35) is too old for Neoverse V2. Steps 1-3: put binutils 2.41 first on `PATH` (Prerequisites). Step 4: the wrapper does it; if the job output has `WARNING: … cannot assemble -mcpu=neoverse-v2`, no gcc-toolset binutils was found: pass one with `qsub -v BINUTILS_DIR=<dir>`. |
 | `objdump … sed` prints nothing for `mul()` | The symbol is `_Z3mulDF16_DF16_` with GCC 15; check with `nm fp16_default \| grep mul`. |
 | `fp16_native` prints method 16 but `256*256-65000 = 544` | Floating-point contraction (`fmadd` in half); compile with `-ffp-contract=off` (step 3). |
 | `fp16 cpu: no` and `NOT RUN (CPU lacks fphp)` for the native builds | The compute node has no FP16; check `lscpu` there (step 1). If so, the task becomes future work. |
