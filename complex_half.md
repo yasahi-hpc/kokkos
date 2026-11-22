@@ -2360,9 +2360,19 @@ lines. That removes the warning from the Kokkos build and tests nothing less. Le
 library as is. User code with `bhalf_t x = Kokkos::infinity_v<bhalf_t>;` under
 `-march=sapphirerapids` will see the same harmless warning, and
 `bhalf_t x(Kokkos::infinity_v<bhalf_t>);` avoids it. **Applied 2026-11-22** at the 6
-lines (the table above shows the old code). Built and run here where `half_t` is
-`float`, and compiled for CUDA (A100 build); to verify on Aurora with
-`run_std_half_fp16.sh` (`native` build: expect 0 warnings).
+lines (commit `664a10b78`; the table above shows the old code). Built and run here
+where `half_t` is `float`, and compiled for CUDA (A100 build). **Verified on Aurora
+(PBS job 9117159, `run_std_half_fp16.sh`, commit `664a10b78`): 0 warnings in both
+builds**, `native` included. That build recompiled every object containing the 6 lines
+(`TestSerial_NumericTraits`, `TestSerial_MathematicalFunctions1-3`,
+`TestSerial_Reductions`, `TestDefaultDeviceType`), and all tests pass:
+`*complex*:*atomic*` 25, `*numeric_traits*` 14, `*half*` 10 (with the H18 tests), in
+both builds; the probe gives the same values as job 9116933.
+
+*Warnings of the `-march=sapphirerapids` build, summary:* 279 (job 9116902) → 7 after
+the `short` ↔ bf16 conversions in `Kokkos_STD_Half_Conversion.hpp` went through float
+(`3c70cfdca`, job 9116933) → 0 after the test lines used direct initialization
+(`664a10b78`, job 9117159).
 
 *Validation of committed work* (first done by the run above; the points below all
 passed there):
@@ -2463,7 +2473,7 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision~~ | done 2026-11-22 (jobs 4260499, 9116902, 9116933): float except `*` under method 16, where libstdc++ overflows and Kokkos does not; optional: functions over the `ch3acc` inputs | GCC ≥ 13 |
 | ~~Remaining 7 `__bfloat16` warnings at test lines (`-march=sapphirerapids`)~~ | done 2026-11-22, job 9116988: GCC false positive on struct-to-struct bit copies; harmless, no change (§8.2) | GCC ≥ 13 on Aurora |
 | ~~H18: `cast_to_half(half_t)`/`cast_to_bhalf(bhalf_t)` missing on the std backend~~ | done: fixed `1220b11de`, verified on Aurora (job 9117024); CUDA run: job 10404035 | GCC ≥ 13 |
-| Direct-initialize the 6 test lines that trigger the `__bfloat16` false positive | applied (§8.2); verify with `run_std_half_fp16.sh` `native` (expect 0 warnings) | GCC ≥ 13 on Aurora |
+| ~~Direct-initialize the 6 test lines that trigger the `__bfloat16` false positive~~ | done: `664a10b78`, verified on Aurora (job 9117159: 0 warnings in both builds, all tests pass) | GCC ≥ 13 on Aurora |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
 | B4a: `constexpr` half, std backend | future work | GCC ≥ 13 |
