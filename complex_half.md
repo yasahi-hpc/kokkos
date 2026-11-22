@@ -278,7 +278,9 @@ arithmetic exists (`KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH`). Provide it as the defaul
      A2.
    - For half, CH1 swaps in a **standard** proxy: `std::complex<float>` for output (exact)
      and `std::complex<double>` for input. This avoids `std::complex<half_t>`, which the
-     standard leaves unspecified.
+     standard leaves unspecified. *(Superseded 2026-11-22 by the B2 revision: input now
+     parses as `std::complex<std::float16_t>` does, reading each part with the C++23 half
+     extractor, through float, clamping at ±max.)*
 2. **The scalar layer:** how one `half_t` is written and read. **Still broken; this is
    the subject of D7 / B2.**
    - Today `complex<half_t>` reaches these operators through `std::complex<half_t>`: its
@@ -289,7 +291,9 @@ arithmetic exists (`KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH`). Provide it as the defaul
    - B2 is still needed for `half_t` itself (`std::cout << h`, gtest messages,
      `is >> h`).
    - The **choice of proxy types** follows the same reasoning as the B2 fix below:
-     `float` for output, `double` for input.
+     `float` for output, `double` for input. *(Superseded by the B2 revision: C++23
+     specifies `float` for input, double rounding included, with clamping at ±max; see
+     the B2 finding in Part B.)*
 
 *Current scalar code* (`Kokkos_Half_FloatingPointWrapper.hpp:866-878`, used by both
 `half_t` and `bhalf_t`):
@@ -1343,6 +1347,78 @@ These are the values of `numeric_limits<std::float16_t/std::bfloat16_t>`.
     `0.000000` check, the locale check, and uncaught `std::invalid_argument` from
     `stod` that abort the input tests.
 
+*B2 finding (2026-11-22): diverges from C++23, and its test fails where `half_t` is
+`float`. Decision: option (a), follow the standard; done (see "B2 revision" below).
+Verified on the A100 (job 10400777): all 25 `*complex*:*atomic*` tests on Serial and
+Cuda, and all 8 `*half*` tests. Also verified where `half_t`/`bhalf_t` are `float`
+(GCC 12, C++23, host-only trial of `run_std_half_gcc13.sh`): 25 + 14 + 8 tests pass,
+0 warnings.* Found by the trial run of
+`run_std_half_gcc13.sh` with GCC 12 in C++23 mode. There `half_t`/`bhalf_t` are `float`
+(no native half), which is the default for every host-only build without C++23
+`std::float16_t`. `half_io` and `bhalf_io` then fail 3 checks each (`TestHalfIO.hpp:128`):
+`"x"` leaves 0, and `"1e999"`/`"-1e999"` leave ±3.40282347e+38, where the test expects 7
+unchanged. That is float extraction behaving as specified: since C++11, `num_get` stores 0
+on a parse failure and ±max on overflow, with failbit. On the A100 the test passes only
+because `half_t` is the wrapper there.
+
+The C++23 rule for the extended types (`[istream.formatted.arithmetic]/4-6`, checked in
+the current draft, eel.is/c++draft) is as if:
+
+```cpp
+FP fval;  // float if rank <= float (float16_t, bfloat16_t), else double, else long double
+use_facet<num_get<...>>(loc).get(*this, 0, *this, state, fval);
+if (fval < -numeric_limits<X>::max())      { state |= failbit; val = -numeric_limits<X>::max(); }
+else if (numeric_limits<X>::max() < fval)  { state |= failbit; val =  numeric_limits<X>::max(); }
+else                                        { val = static_cast<X>(fval); }
+```
+
+Note 2 there accepts the double rounding this causes and points to `from_chars` for maximum
+accuracy. B2 differs in three ways:
+1. It reads through `double`, not `float`. D7 chose `double` to avoid the double rounding,
+   but the standard specifies `float`.
+2. On a parse failure it leaves the value unchanged; std stores 0.
+3. Above half's range it gives inf without failbit (`"1e5"`), or keeps the value
+   (`"1e999"`); std stores ±`max()` (65504 for half) and sets failbit.
+
+The CH1 complex proxy reads `std::complex<double>`. `std::complex<std::float16_t>`
+extraction reads each part with `is >> float16_t`, i.e. through float with the same
+clamping.
+
+Options:
+- **(a)** follow the standard exactly (read float, clamp to ±max with failbit, 0 on a
+  parse failure), in the wrapper and in the CH1 proxy, and fix the tests;
+- **(b)** keep the double reading (more accurate), but fix the test so that it also holds
+  where `half_t` is `float`.
+
+Either way the committed test must change: as it is, it fails in every build without a
+native half type.
+
+*B2 revision (option (a)):*
+- **Scalar extractor** (`Kokkos_Half_FloatingPointWrapper.hpp`): the C++23 fragment.
+  - sentry, then `num_get<CharT>::get` into a `float`;
+  - beyond ±`max()`: failbit and ±`max()`;
+  - otherwise convert (num_get gives 0 on a parse failure);
+  - a failed sentry leaves the value unchanged.
+- **Complex extractor** (`Kokkos_Complex.hpp`): for half types it no longer reads a
+  `std::complex<double>`. It parses `u`, `(u)`, `(u,v)` with the libstdc++ algorithm,
+  reading each part with the half extractor. That is what `std::complex<std::float16_t>`
+  does, so a part beyond the range fails at that part: the value is unchanged and the
+  rest is not read. `Impl::complex_istream_t` is removed; float/double still delegate to
+  `std::complex<RealType>` (A2).
+- **Insertion is unchanged.** C++23 formats the extended types as if
+  `static_cast<double>(val)`, and `os << float` goes through `double` too.
+- **`TestHalfIO.hpp`:**
+  - errors: `"x"` → 0, `"±1e999"` → ±`max()` (failbit), `""` unchanged;
+  - in range: equal to `H(strtof(s))` (compared through the float bits, so −0
+    counts);
+  - rounding cases: now 1, because through float the input becomes the midpoint,
+    which rounds to even;
+  - new range cases: half `"±1e5"`, bhalf `"±3.4e38"` → ±`max()`;
+  - holds also where `half_t` is `float`.
+- **`TestComplex.hpp`:** `complex_io_like_std` compares half against
+  `std::complex<float>`; new `testComplexIOHalfRange` checks failure, unchanged value
+  and the unread rest for out-of-range parts.
+
 **B3. Treat half as a floating-point type in the scalar promotion traits (H8, D8).**
 Specialise `Kokkos::Impl::promote` for `half_t`/`bhalf_t` (`using type = half_t`) in
 `Kokkos_Half_MathematicalFunctions.hpp`, and define `promote_2` for half pairs via
@@ -1718,6 +1794,51 @@ cross-check: if Kokkos ever matches `cuda::std` on it, the promotion is not acti
 Reuse `Impl::complex_multiply` (A5) and `Impl::complex_divide<float>` for the promoted
 path, rather than duplicating the recovery logic.
 
+*CH3 vs. C++23 and libstdc++ (checked 2026-11-22).* Is computing `complex<half_t>` in
+float what C++23 does for `std::complex<std::float16_t>`?
+- **The standard does not fix it.** [complex.numbers] specifies what the operations
+  compute, not the precision of intermediates. [expr.pre] lets floating-point
+  expressions be evaluated "in greater precision and range than that required by the
+  type". So float intermediates conform, as do half ones.
+- **The reference implementation is libstdc++ (GCC ≥ 13),** the only one with
+  `std::float16_t`; clang/libc++ and MSVC have none. Source read:
+  `libstdc++-v3/include/std/complex` and `libgcc/libgcc2.c`, `releases/gcc-13` branch.
+
+  | operation | libstdc++ 13 for `std::complex<std::float16_t>` | Kokkos `complex<half_t>` (CH3) |
+  |---|---|---|
+  | `abs`, `arg` | `_Float16(__builtin_cabsf(z))`, `cargf` (`complex:602-609`) | `hypot`/`atan2` of half, computed in float (H9) |
+  | `exp log sqrt sin cos tan sinh cosh tanh pow` | `static_cast<__complex__ _Float16>(__builtin_cexpf(z))` etc. (`complex:611-649`) | `complex<float>` function, rounded once |
+  | `asin acos atan asinh acosh atanh` | same pattern with `cacosf` … (`complex:2038-`) | same |
+  | `/` | the compiler's `__complex__ _Float16` division. libgcc `__divhc3` computes in `SFtype` (`AMTYPE`, `libgcc2.c:1860-1863, 2026-2050`, "Half precision is handled with float precision"), with the plain formula; on x86 without AVX512-FP16 the whole expression is evaluated in float | Smith's algorithm (A3) in float, rounded once |
+  | `*` | the compiler's `__complex__ _Float16` multiplication, **target-dependent**: evaluated in float where `__FLT_EVAL_METHOD_TS_18661_3__` is 0 (x86 without AVX512-FP16), in half where it is 16 (`-mavx512fp16`, i.e. Sapphire Rapids and later) | A5 formula in float, rounded once |
+
+  The bf16 functions follow the same float pattern (`complex:806-`). bf16 arithmetic
+  was not measured.
+- **Measured with GCC 12** (`_Complex _Float16` in C; the same compiler arithmetic
+  libstdc++ uses; GCC 12's C++ front end rejects `__complex__ _Float16`):
+  - x86 without AVX512-FP16 (the login node): `__FLT_EVAL_METHOD_TS_18661_3__` = 0,
+    for every `-fexcess-precision` and `-O` level. `(269,111.5)²` = `(59936, 60000)` and
+    `(60000,60000)/(1,1)` = `(60000, 0)`, the same as Kokkos after CH3. The code widens
+    to float (`__extendhfsf2`, `mulss`).
+  - `-mavx512fp16` (compiled, not run; this CPU lacks it): the method becomes 16, `*`
+    uses `vmulsh` (each product rounded to half, so `269²` overflows to inf, as
+    Kokkos did before CH3), and `/` calls `__divhc3` (float).
+- **Conclusion:** CH3 matches libstdc++ for all functions and `/` everywhere, and for `*`
+  on targets that evaluate `_Float16` in float. On FP16-native targets libstdc++'s `*`
+  is less accurate and can overflow, while Kokkos stays in float; the standard allows
+  both. The bits may still differ in the last place: Kokkos uses its own float
+  algorithms, libstdc++ glibc's `cexpf`/`casinf`…
+- **GCC 15 on aarch64 (PBS job 4260499, 2026-11-22; §8.2 "First run"):**
+  `__FLT_EVAL_METHOD_TS_18661_3__` = 0 (and `__FLT_EVAL_METHOD__` = 0) with the tests'
+  flags, i.e. Kokkos's default target options, no `Kokkos_ARCH_*`. GCC then evaluates
+  `_Float16` in float, so libstdc++'s `*` is float too: **on that configuration CH3
+  matches libstdc++ for every operation.** Not checked: a CPU option that enables FP16
+  arithmetic (e.g. `Kokkos_ARCH_ARMV9_GRACE`, `-mcpu=neoverse-v2`), which is expected
+  to give 16, as `-mavx512fp16` does on x86.
+- **Still to confirm** (C++ front end, real `std::complex<std::float16_t>`): compare
+  `std::complex<std::float16_t>` with Kokkos on the `ch3acc` inputs (D5 to-do, §8.2),
+  and the method with an FP16-enabling CPU option.
+
 **CH4. Interop with `std::complex<std::float16_t>` on C++23 host builds (D2). — FUTURE WORK (decided 2026-11-22).**
 *Not implemented: it needs GCC ≥ 13 in C++23 mode (`KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT`),
 which is not available on this system (see B4a). Pick it up together with B4a on a
@@ -1890,7 +2011,56 @@ Configure host-only: `-DCMAKE_CXX_STANDARD=23 -DKokkos_ENABLE_SERIAL=ON`, option
 (defined iff the compiler defines `__STDCPP_FLOAT16_T__`, e.g.
 `echo | g++ -std=c++23 -dM -E -x c++ - | grep STDCPP`).
 
-*Validation of committed work* (nothing has ever run with this half backend):
+**Job script: `run_std_half_gcc13.sh`** (repository root; not committed). It is a PBS
+job script for the GCC ≥ 13 machine:
+- header `-q regular-g`, `select=1`, walltime 1:00:00, `group_list=jh220036`;
+- submit it with `qsub run_std_half_gcc13.sh` from a checkout of `refactor-complex`;
+- it changes to `$PBS_O_WORKDIR` and loads `cmake/3.31.1 gcc/15.2.0` (override with
+  `MODULES`);
+- it can also run directly with `bash`, from the current directory.
+
+Its first line is `#!/bin/bash -e`, followed by `set +e`, so that a failing step still
+reaches the summary. It:
+1. records the environment: compiler, commit, comma-decimal locales;
+2. stops unless GCC ≥ 13 defines `__STDCPP_FLOAT16_T__` with `-std=c++23` (bf16 only
+   warns);
+3. configures Serial (`ENABLE_OPENMP=ON` adds OpenMP) with `CMAKE_CXX_STANDARD=23` and
+   `CMAKE_CXX_EXTENSIONS=OFF`. Strict ISO, because Kokkos otherwise uses `-std=gnu++23`,
+   whose excess-precision default may differ;
+4. preprocesses with the tests' own flags to show which half backend Kokkos selected
+   (`KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT`, `*_T_IS_FLOAT`,
+   `KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH`, `__FLT_EVAL_METHOD__`), and stops unless it is
+   the std backend;
+5. builds `Kokkos_CoreTestCompileOnly` (contains `TestHalfCommonType`),
+   `Kokkos_CoreUnitTest_Serial_SmokeTest`, `..._Serial1` and `..._Default`, counting
+   warnings;
+6. runs the §8.1 filters (`*complex*:*atomic*`, `*numeric_traits*`, `*half*`; `FULL=ON`:
+   also everything) and prints a summary, with a nonzero exit status on any failure.
+
+Settings are environment variables (`KOKKOS_SRC`, `BUILD_DIR`, `CXX`, `BUILD_TYPE`,
+`JOBS`, `MODULES`, `FULL`; with PBS: `qsub -v NAME=value`); logs go to
+`$BUILD_DIR/std_half_logs/`, and the job's output (`-j oe`) is the summary.
+The compiler is chosen after `module purge`/`module load`: a `CXX` from the submit
+environment would name the purged compiler (this was the first run's `CXX: unbound
+variable`), so `CXX` is used only with `MODULES=`. `TERM` is set to `dumb` for the
+`module` command; the remaining `tput: No value for $TERM` lines at the top of the job
+output come from the job shell's startup, before the script, and are harmless.
+
+*First run (PBS job 4260499, 2026-11-22): all pass.* `mg0959` (aarch64), GCC 15.2.0,
+CMake 3.31.1, commit `2379511da`, Debug, Serial, `-std=c++23`:
+- the probe: `STD_HALF=1`, `STD_BHALF=1`, `HALF_FULL_TYPE=1`, `HALF_T_IS_FLOAT=false`,
+  `BHALF_T_IS_FLOAT=false`, `FLT_EVAL_METHOD=0`, `FLT_EVAL_METHOD_TS_18661_3=0`. Both
+  half types wrap the std types, so the tests below exercise real 16-bit types on the
+  host for the first time;
+- builds: the 4 targets, 0 warnings (so `TestHalfCommonType` passes);
+- runs: `*complex*:*atomic*` 25/25 (including `complex_half_scalar_promotion`,
+  `complex_half_conversions`, `complex_half_compute_in_float`), `*numeric_traits*`
+  14/14, `*half*` 8/8 (including H17's `half_`/`bhalf_bool_conversion`);
+- not covered: the node has no `de_DE`/`fr_FR` locale, so the locale branch of
+  `half_io` did not run; OpenMP and `FULL=ON` were not run.
+
+*Validation of committed work* (first done by the run above; the points below all
+passed there):
 - **All tests in §8.1.** Particular points:
   - **CH1 constants:** `T(infinity_v<T>)` from `BitComparisonWrapper` with a
     `std::float16_t` `impl_type`.
@@ -1909,9 +2079,12 @@ Configure host-only: `-DCMAKE_CXX_STANDARD=23 -DKokkos_ENABLE_SERIAL=ON`, option
   `operator std::complex<RealType>()`). There `std::complex<half_t>` is
   `std::complex<floating_point_wrapper<std::float16_t>>`: unspecified, and never compiled
   with libstdc++ 13+.
-- **D5 to-do:** compare Kokkos with `std::complex<std::float16_t>`, e.g. for `(269,111.5)²`,
-  `(60000,60000)/(1,1)` and the `ch3acc` inputs. Does libstdc++ compute in float (excess
-  precision) like CH3, or in half?
+- **D5 to-do (mostly answered; see "CH3 vs. C++23 and libstdc++"):** from source,
+  libstdc++ computes all functions in float, and `/` in float. `*` follows the
+  compiler's `_Float16` evaluation method: float on x86 without AVX512-FP16, half with
+  it; on the aarch64 machine with default options it is float (method 0, job 4260499).
+  Still to do: compare `std::complex<std::float16_t>` with Kokkos on the `ch3acc`
+  inputs, and the method with an FP16-enabling `-mcpu`/`Kokkos_ARCH_*`.
 
 *Future tasks that become testable here:*
 - **B4a:** `constexpr` std backend; native conversions, so no software path.
@@ -1972,9 +2145,9 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 
 | Task | Kind | Where it can be tested |
 |---|---|---|
-| Validation of A1-A7, B1-B3, CH1-CH3 with the std half backend | verification of committed work | GCC ≥ 13, C++23 (§8.2) |
+| ~~Validation of A1-A7, B1-B3, CH1-CH3, H17 with the std half backend~~ | done 2026-11-22, job 4260499: 25 + 14 + 8 tests pass, 0 warnings (GCC 15, aarch64; Serial only) | GCC ≥ 13, C++23 (§8.2) |
 | `std::complex<half_t>` interop with libstdc++ ≥ 13 (half-complex.md §3.2) | verification | GCC ≥ 13 |
-| D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision | measurement | GCC ≥ 13 |
+| D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision | measurement (source analysis done: float, except `*` on FP16-native CPUs; aarch64 default options: float, job 4260499); left: compare with Kokkos on `ch3acc` inputs, FP16-enabling `-mcpu` | GCC ≥ 13 |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
 | B4a: `constexpr` half, std backend | future work | GCC ≥ 13 |
