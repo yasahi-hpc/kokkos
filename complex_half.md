@@ -1955,6 +1955,11 @@ float what C++23 does for `std::complex<std::float16_t>`?
   matches libstdc++ for every operation.** Not checked: a CPU option that enables FP16
   arithmetic (e.g. `Kokkos_ARCH_ARMV9_GRACE`, `-mcpu=neoverse-v2`), which is expected
   to give 16, as `-mavx512fp16` does on x86.
+- **Aurora, GCC 14, `-march=sapphirerapids` (job 9116902; §8.2):** method 16 confirmed,
+  and a half `*` compiles to `vmulsh`, so on this target libstdc++'s
+  `std::complex<std::float16_t>` `*` is expected to round each product to half. Kokkos's
+  complex tests, including `complex_half_compute_in_float`, pass there. The probe that
+  prints libstdc++'s actual result failed to compile in that run (fixed; rerun pending).
 - **Still to confirm** (C++ front end, real `std::complex<std::float16_t>`): compare
   `std::complex<std::float16_t>` with Kokkos on the `ch3acc` inputs (D5 to-do, §8.2),
   and the method with an FP16-enabling CPU option.
@@ -2184,6 +2189,47 @@ CMake 3.31.1, commit `2379511da`, Debug, Serial, `-std=c++23`:
 - not covered: the node has no `de_DE`/`fr_FR` locale, so the locale branch of
   `half_io` did not run; OpenMP and `FULL=ON` were not run.
 
+**Job script `run_std_half_fp16.sh`** (repository root): the same tests on a CPU with
+native half arithmetic. Written for Aurora (PBS, `-A kokkos_math`, `module load cmake`,
+GCC 14 as `/usr/bin/g++-14`; a non-GCC `CXX` such as oneAPI's `icpx` is ignored). It
+builds twice: `default` (no `Kokkos_ARCH_*`) and `native` (`Kokkos_ARCH_SPR`,
+`-march=sapphirerapids`), and for each prints the evaluation-method macros, the code of
+one half multiplication at `-O2`, and a probe program whose results differ between
+float and half evaluation (`std::float16_t` scalar, `std::complex<std::float16_t>` and
+`Kokkos::complex<half_t>` `*` and `/`). Its output is also saved as
+`std_half_fp16_logs.<job>/job.out`.
+
+*Run on Aurora (PBS job 9116902, 2026-11-22): all tests pass.* Xeon Max 9470C
+(`avx512_fp16`), GCC 14.2.0, commit `b5d91eb67`, Debug, Serial:
+
+| | `default` | `native` (`Kokkos_ARCH_SPR`) |
+|---|---|---|
+| `__FLT_EVAL_METHOD_TS_18661_3__` | 0 | **16** |
+| `__AVX512FP16__` | — | 1 |
+| `HALF_T_IS_FLOAT`, `BHALF_T_IS_FLOAT` | false, false | false, false |
+| one half `*` (`std::float16_t` and `half_t`) | through float: `__extendhfsf2`, `mulss`, `__truncsfhf2` | **`vmulsh`** |
+| tests `*complex*:*atomic*` / `*numeric_traits*` / `*half*` | 25 / 14 / 8 pass | 25 / 14 / 8 pass |
+| build warnings | 0 | 279, one kind (below) |
+
+So with native half arithmetic the scalar `half_t` operators compute in half, and the
+complex tests still pass, including `complex_half_compute_in_float` (bit-identical to the
+float path): CH3's `*`, `/` and functions do not depend on the evaluation method. The
+probe program did not compile in this run (`complex<H> k(H(v269), H(v111))` parsed as a
+function declaration; fixed with braces), so libstdc++'s
+`std::complex<std::float16_t>` results under method 16 are still to be read (D5).
+
+*The 279 warnings* are GCC ≥ 13's "`__bfloat16` is redefined from typedef `short` to
+real `__bf16` since GCC 13.1 …", emitted wherever the x86 BF16 intrinsics are visible.
+They come from the `short`/`unsigned short` overloads of `cast_to_bhalf`/`cast_from_bhalf`
+in `Kokkos_STD_Half_Conversion.hpp` (predating this branch, `c7d070bc6`), and GCC also
+reports them at six test lines that construct `bhalf_t` (`TestNumericTraits.hpp:114,123`,
+`TestMathematicalFunctions.hpp:2965-2967`, `TestReduce.hpp:789`,
+`TestHalfOperators.hpp:972`). The results are right (`bhalf_conversion` and the numeric
+traits pass). *Fix (2026-11-22, not yet built):* those four overloads now convert
+through `float`, which holds every `short`, `unsigned short` and `std::bfloat16_t`
+value exactly, so the results are those of the direct conversion. Whether the reports
+at the test lines also go away is to be checked in the next run.
+
 *Validation of committed work* (first done by the run above; the points below all
 passed there):
 - **All tests in §8.1.** Particular points:
@@ -2280,7 +2326,7 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 |---|---|---|
 | ~~Validation of A1-A7, B1-B3, CH1-CH3, H17 with the std half backend~~ | done 2026-11-22, job 4260499: 25 + 14 + 8 tests pass, 0 warnings (GCC 15, aarch64; Serial only) | GCC ≥ 13, C++23 (§8.2) |
 | ~~`std::complex<half_t>` interop with libstdc++ ≥ 13 (half-complex.md §3.2)~~ | done 2026-11-22, job 4260499 (GCC 15; 13/14 not run); no further work (§8.2, A8) | GCC ≥ 13 |
-| D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision | measurement (source analysis done: float, except `*` on FP16-native CPUs; aarch64 default options: float, job 4260499); left: compare with Kokkos on `ch3acc` inputs, FP16-enabling `-mcpu` | GCC ≥ 13 |
+| D5 to-do: libstdc++ `complex<std::float16_t>` intermediate precision | measurement (source analysis done: float, except `*` on FP16-native CPUs; aarch64 default options: float, job 4260499; x86 `-march=sapphirerapids`: half, `vmulsh`, Kokkos tests pass, job 9116902); left: the probe's libstdc++ values (rerun `run_std_half_fp16.sh`), compare with Kokkos on `ch3acc` inputs | GCC ≥ 13 |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
 | B4a: `constexpr` half, std backend | future work | GCC ≥ 13 |

@@ -91,13 +91,21 @@ cast_from_half(half_t val) {
 #ifdef KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT
 namespace Kokkos {
 namespace Experimental {
+// The short and unsigned short overloads convert through float, which holds
+// every value of both types and of std::bfloat16_t exactly, so the result is
+// that of the direct conversion. Converting directly makes GCC >= 13 warn
+// wherever the x86 BF16 intrinsics are visible (e.g. -march=sapphirerapids):
+// "'__bfloat16' is redefined from typedef 'short' to real '__bf16'".
+
 // cast_to_bhalf
 inline bhalf_t cast_to_bhalf(float val) { return bhalf_t::impl_type(val); }
 inline bhalf_t cast_to_bhalf(bool val) { return bhalf_t::impl_type(val); }
 inline bhalf_t cast_to_bhalf(double val) { return bhalf_t::impl_type(val); }
-inline bhalf_t cast_to_bhalf(short val) { return bhalf_t::impl_type(val); }
+inline bhalf_t cast_to_bhalf(short val) {
+  return bhalf_t::impl_type(static_cast<float>(val));
+}
 inline bhalf_t cast_to_bhalf(unsigned short val) {
-  return bhalf_t::impl_type(val);
+  return bhalf_t::impl_type(static_cast<float>(val));
 }
 inline bhalf_t cast_to_bhalf(int val) { return bhalf_t::impl_type(val); }
 inline bhalf_t cast_to_bhalf(unsigned int val) {
@@ -131,12 +139,14 @@ inline std::enable_if_t<std::is_same_v<T, double>, T> cast_from_bhalf(
 template <typename T>
 inline std::enable_if_t<std::is_same_v<T, short>, T> cast_from_bhalf(
     bhalf_t val) {
-  return static_cast<bhalf_t::impl_type>(val);
+  return static_cast<T>(
+      static_cast<float>(static_cast<bhalf_t::impl_type>(val)));
 }
 template <typename T>
 inline std::enable_if_t<std::is_same_v<T, unsigned short>, T> cast_from_bhalf(
     bhalf_t val) {
-  return static_cast<bhalf_t::impl_type>(val);
+  return static_cast<T>(
+      static_cast<float>(static_cast<bhalf_t::impl_type>(val)));
 }
 template <typename T>
 inline std::enable_if_t<std::is_same_v<T, int>, T> cast_from_bhalf(
