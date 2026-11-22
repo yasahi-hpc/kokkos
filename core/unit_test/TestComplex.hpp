@@ -668,15 +668,16 @@ TEST(TEST_CATEGORY, complex_io_failure) {
 
 // Insertion and extraction behave like those of std::complex<RealType>.  For
 // half_t and bhalf_t (std::complex<half_t> is unspecified), like those of
-// std::complex<float> holding the same values for insertion, and of
-// std::complex<double> followed by one rounding to the half type for
-// extraction.
+// std::complex<float> holding the same values, the parts then converted to
+// the half type: std::complex<std::float16_t> reads its parts through float
+// (C++23 [istream.formatted.arithmetic]/6).  Parts beyond the half type's
+// range are tested separately.
 template <class RealType, class CharT>
 void testComplexIOLikeStd() {
   using Out =
       std::conditional_t<std::is_floating_point_v<RealType>, RealType, float>;
   using In =
-      std::conditional_t<std::is_floating_point_v<RealType>, RealType, double>;
+      std::conditional_t<std::is_floating_point_v<RealType>, RealType, float>;
   using Stream = std::basic_stringstream<CharT>;
   using String = std::basic_string<CharT>;
   auto widen   = [](const char *s) {
@@ -738,6 +739,29 @@ void testComplexIOLikeStd() {
   }
 }
 
+// A part beyond the range of the half type fails as in
+// std::complex<std::float16_t>: the part's extraction sets failbit, so the
+// complex number is unchanged and the rest of the input is not read.
+template <class RealType>
+void testComplexIOHalfRange(const char *too_big) {
+  using C = Kokkos::complex<RealType>;
+  const std::string big(too_big);
+  for (const std::string &input :
+       {big, "(" + big + ")", "(" + big + ",2)z", "(1," + big + ")z"}) {
+    SCOPED_TRACE(input);
+    std::stringstream ss(input);
+    C z(RealType(5), RealType(6));
+    ss >> z;
+    EXPECT_TRUE(ss.fail());
+    EXPECT_EQ(z, C(RealType(5), RealType(6)));
+    ss.clear();
+    const std::string rest(std::istreambuf_iterator<char>(ss), {});
+    const std::string expected_rest =
+        input.substr(input.find(big) + big.size());
+    EXPECT_EQ(rest, expected_rest);
+  }
+}
+
 TEST(TEST_CATEGORY, complex_io_like_std) {
   testComplexIOLikeStd<float, char>();
   testComplexIOLikeStd<double, char>();
@@ -748,6 +772,12 @@ TEST(TEST_CATEGORY, complex_io_like_std) {
 #endif
 #if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
   testComplexIOLikeStd<Kokkos::Experimental::bhalf_t, char>();
+#endif
+#if !KOKKOS_HALF_T_IS_FLOAT
+  testComplexIOHalfRange<Kokkos::Experimental::half_t>("1e5");
+#endif
+#if !KOKKOS_BHALF_T_IS_FLOAT
+  testComplexIOHalfRange<Kokkos::Experimental::bhalf_t>("3.4e38");
 #endif
 }
 

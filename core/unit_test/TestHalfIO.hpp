@@ -5,19 +5,25 @@
 #define TESTHALFIO_HPP_
 
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <iomanip>
 #include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace Test {
 
-// Stream insertion and extraction of half_t and bhalf_t.  Insertion writes
-// the value as the float it is exactly equal to, so it follows the stream's
-// flags, precision and locale; extraction reads a double, stops where a
-// number ends, and reports errors with failbit (no exceptions).
+// Stream insertion and extraction of half_t and bhalf_t, as for
+// std::float16_t and std::bfloat16_t (C++23 [ostream.inserters.arithmetic],
+// [istream.formatted.arithmetic]/4-6).  Insertion writes the value as the
+// float it is exactly equal to, so it follows the stream's flags, precision
+// and locale.  Extraction reads a float, stops where a number ends, and
+// reports errors with failbit (no exceptions): beyond +-max() it stores
+// +-max(), on a parse failure 0.  The tests also hold where half_t or bhalf_t
+// is float (no native half type): that is float's own extraction.
 
 // A locale whose decimal point is ',', to check that the stream's own locale
 // is used (and not the C global locale).  A named locale is used: a
@@ -118,14 +124,35 @@ void test_half_io_input() {
     EXPECT_EQ(static_cast<float>(a), 1.5f);
     EXPECT_EQ(c, ')');
   }
-  // Errors set failbit, do not throw, and leave the value unchanged.
-  for (const char *input : {"x", "", "1e999", "-1e999"}) {
-    SCOPED_TRACE(input);
-    std::istringstream is(input);
+  // Errors set failbit and do not throw.  A parse failure stores 0, a value
+  // beyond the range +-max(); without input (the sentry fails) the value is
+  // unchanged.
+  const float max =
+      static_cast<float>(H(Kokkos::Experimental::finite_max_v<H>));
+  const struct {
+    const char *input;
+    float expected;
+  } errors[] = {{"x", 0.f}, {"", 7.f}, {"1e999", max}, {"-1e999", -max}};
+  for (const auto &e : errors) {
+    SCOPED_TRACE(e.input);
+    std::istringstream is(e.input);
     H h(7.f);
     EXPECT_NO_THROW(is >> h);
     EXPECT_TRUE(is.fail());
-    EXPECT_EQ(static_cast<float>(h), 7.f);
+    EXPECT_EQ(static_cast<float>(h), e.expected);
+  }
+  // In range: exactly the float read by the stream, converted to H.
+  for (const char *input :
+       {"3.14159", "-2.5e-3", "65504", "1e-7", "  42", "-0"}) {
+    SCOPED_TRACE(input);
+    std::istringstream is(input);
+    H h(7.f);
+    is >> h;
+    EXPECT_FALSE(is.fail());
+    const H expected(std::strtof(input, nullptr));
+    // The bits of the float values: also tells -0 from 0.
+    EXPECT_EQ(Kokkos::bit_cast<std::uint32_t>(static_cast<float>(h)),
+              Kokkos::bit_cast<std::uint32_t>(static_cast<float>(expected)));
   }
   // Reading until the end of the input stops normally.
   {
@@ -151,9 +178,10 @@ void test_half_io_input() {
   }
 }
 
-// Extraction rounds once (through double): a decimal just above the midpoint
-// between 1 and the next value must round up.  Through float it would first
-// round to the midpoint and then to even, i.e. to 1.
+// Extraction reads a float and then converts, as the standard specifies; this
+// can round twice (the standard's note accepts it): a decimal just above the
+// midpoint between 1 and the next value reads as the midpoint, which rounds to
+// even, i.e. to 1.
 template <class H>
 void test_half_io_rounding(const char *just_above_midpoint, float expected) {
   std::istringstream is(just_above_midpoint);
@@ -161,6 +189,23 @@ void test_half_io_rounding(const char *just_above_midpoint, float expected) {
   is >> h;
   EXPECT_FALSE(is.fail());
   EXPECT_EQ(static_cast<float>(h), expected) << just_above_midpoint;
+}
+
+// A value beyond the range of H but not of float sets failbit and stores
+// +-max(), as for std::float16_t (and std::bfloat16_t, whose max() is below
+// float's).
+template <class H>
+void test_half_io_range(const char *above_max, const char *below_min) {
+  const H max(Kokkos::Experimental::finite_max_v<H>);
+  for (const auto &[input, expected] :
+       {std::pair{above_max, max}, std::pair{below_min, H(-max)}}) {
+    SCOPED_TRACE(input);
+    std::istringstream is(input);
+    H h(7.f);
+    is >> h;
+    EXPECT_TRUE(is.fail());
+    EXPECT_EQ(static_cast<float>(h), static_cast<float>(expected));
+  }
 }
 
 // Every finite value survives insertion with the default precision (6, which
@@ -191,10 +236,10 @@ TEST(TEST_CATEGORY, half_io) {
   test_half_io_output<Kokkos::Experimental::half_t>();
   test_half_io_input<Kokkos::Experimental::half_t>();
 #if !KOKKOS_HALF_T_IS_FLOAT
-  // 1 + 2^-11 + 1e-15: the half midpoint is 1 + 2^-11, the next value
-  // 1 + 2^-10.
-  test_half_io_rounding<Kokkos::Experimental::half_t>("1.000488281250001",
-                                                      1.0009765625f);
+  // 1 + 2^-11 + 1e-15 reads as the float 1 + 2^-11, the half midpoint between
+  // 1 and 1 + 2^-10, which rounds to even.
+  test_half_io_rounding<Kokkos::Experimental::half_t>("1.000488281250001", 1.f);
+  test_half_io_range<Kokkos::Experimental::half_t>("1e5", "-1e5");
   test_half_io_round_trip<Kokkos::Experimental::half_t>();
 #endif
 }
@@ -203,9 +248,12 @@ TEST(TEST_CATEGORY, bhalf_io) {
   test_half_io_output<Kokkos::Experimental::bhalf_t>();
   test_half_io_input<Kokkos::Experimental::bhalf_t>();
 #if !KOKKOS_BHALF_T_IS_FLOAT
-  // 1 + 2^-8 + 1e-15: the bhalf midpoint is 1 + 2^-8, the next value 1 + 2^-7.
+  // 1 + 2^-8 + 1e-15 reads as the float 1 + 2^-8, the bhalf midpoint between 1
+  // and 1 + 2^-7, which rounds to even.
   test_half_io_rounding<Kokkos::Experimental::bhalf_t>("1.003906250000001",
-                                                       1.0078125f);
+                                                       1.f);
+  // bhalf_t's max() is 0x1.fep127 < float's max().
+  test_half_io_range<Kokkos::Experimental::bhalf_t>("3.4e38", "-3.4e38");
   test_half_io_round_trip<Kokkos::Experimental::bhalf_t>();
 #endif
 }

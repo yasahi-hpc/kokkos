@@ -1660,18 +1660,16 @@ operator/(const RealType1& x,
 // cannot be deduced from Kokkos::complex (implicit conversions are not
 // considered during deduction), and operator>> needs an lvalue std::complex.
 //
-// For half_t and bhalf_t, a standard std::complex is used instead of
-// std::complex<half_t> (unspecified for a class type): std::complex<float> for
-// writing, which holds every half value exactly, and std::complex<double> for
-// reading, which then rounds once to the half type (through float it would
-// round twice).  This matches the scalar operators of half_t and bhalf_t.
+// For half_t and bhalf_t, std::complex<half_t> (unspecified for a class type)
+// is not used: writing goes through std::complex<float>, which holds every
+// half value exactly; reading parses "u", "(u)" or "(u,v)" as std::complex
+// does (the libstdc++ algorithm), reading each part with the extractor of
+// half_t or bhalf_t.  That is what std::complex<std::float16_t> does, so a
+// part beyond the half type's range fails there (and stops the extraction).
 namespace Impl {
 template <class RealType>
 using complex_ostream_t =
     std::conditional_t<std::is_floating_point_v<RealType>, RealType, float>;
-template <class RealType>
-using complex_istream_t =
-    std::conditional_t<std::is_floating_point_v<RealType>, RealType, double>;
 }  // namespace Impl
 
 /// \brief Insertion operator: writes "(real,imag)" as std::complex does.
@@ -1688,10 +1686,44 @@ std::basic_ostream<CharT, Traits>& operator<<(
 template <class RealType, class CharT, class Traits>
 std::basic_istream<CharT, Traits>& operator>>(
     std::basic_istream<CharT, Traits>& is, complex<RealType>& x) {
-  std::complex<Impl::complex_istream_t<RealType>> x_std;
-  if (is >> x_std) {
-    x = complex<RealType>(static_cast<RealType>(x_std.real()),
-                          static_cast<RealType>(x_std.imag()));
+  if constexpr (std::is_floating_point_v<RealType>) {
+    std::complex<RealType> x_std;
+    if (is >> x_std) x = complex<RealType>(x_std.real(), x_std.imag());
+  } else {
+    bool fail = true;
+    CharT ch;
+    if (is >> ch) {
+      if (Traits::eq(ch, is.widen('('))) {
+        RealType u;
+        if (is >> u >> ch) {
+          const CharT rparen = is.widen(')');
+          if (Traits::eq(ch, rparen)) {
+            x    = complex<RealType>(u);
+            fail = false;
+          } else if (Traits::eq(ch, is.widen(','))) {
+            RealType v;
+            if (is >> v >> ch) {
+              if (Traits::eq(ch, rparen)) {
+                x    = complex<RealType>(u, v);
+                fail = false;
+              } else {
+                is.putback(ch);
+              }
+            }
+          } else {
+            is.putback(ch);
+          }
+        }
+      } else {
+        is.putback(ch);
+        RealType u;
+        if (is >> u) {
+          x    = complex<RealType>(u);
+          fail = false;
+        }
+      }
+    }
+    if (fail) is.setstate(std::ios_base::failbit);
   }
   return is;
 }

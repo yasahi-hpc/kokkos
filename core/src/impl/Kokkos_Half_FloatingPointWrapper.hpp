@@ -9,6 +9,8 @@
 
 #include <type_traits>
 #include <istream>  // extraction and insertion operators
+#include <iterator>
+#include <locale>
 #include <ostream>
 #include <cstdint>
 
@@ -374,7 +376,7 @@ class alignas(FloatType) floating_point_wrapper {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     tmp.val = +tmp.val;
 #else
-    tmp.val = cast_to_wrapper(+cast_from_wrapper<float>(tmp), val).val;
+    tmp.val   = cast_to_wrapper(+cast_from_wrapper<float>(tmp), val).val;
 #endif
     return tmp;
   }
@@ -385,7 +387,7 @@ class alignas(FloatType) floating_point_wrapper {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     tmp.val = -tmp.val;
 #else
-    tmp.val = cast_to_wrapper(-cast_from_wrapper<float>(tmp), val).val;
+    tmp.val   = cast_to_wrapper(-cast_from_wrapper<float>(tmp), val).val;
 #endif
     return tmp;
   }
@@ -398,7 +400,7 @@ class alignas(FloatType) floating_point_wrapper {
 #else
     float tmp = cast_from_wrapper<float>(*this);
     ++tmp;
-    val = cast_to_wrapper(tmp, val).val;
+    val       = cast_to_wrapper(tmp, val).val;
 #endif
     return *this;
   }
@@ -872,16 +874,39 @@ class alignas(FloatType) floating_point_wrapper {
     return os << static_cast<float>(x);
   }
 
-  // Extraction reads a double and rounds it once to the half type: reading a
-  // float first would round twice (e.g. "1.000488281250001", just above the
-  // midpoint between 1 and 1 + 2^-10, would become 1).  The number ends where
-  // a double ends, so ')' and ',' stay in the stream; on failure failbit is
-  // set and x is left unchanged, as for the arithmetic types.
+  // Extraction as for std::float16_t and std::bfloat16_t (C++23
+  // [istream.formatted.arithmetic]/4-6): read a float with the locale's
+  // num_get (so the number ends where a float ends, and ')' and ',' stay in
+  // the stream), then convert.  A value beyond +-max() sets failbit and stores
+  // +-max(); a parse failure sets failbit and stores 0 (num_get's result).
+  // The conversion through float can round twice, as the standard accepts
+  // (e.g. "1.000488281250001", just above the midpoint between 1 and
+  // 1 + 2^-10, reads as the midpoint and rounds to 1).
   template <class CharT, class Traits>
   friend std::basic_istream<CharT, Traits>& operator>>(
       std::basic_istream<CharT, Traits>& is, floating_point_wrapper& x) {
-    double d;
-    if (is >> d) x = d;
+    const typename std::basic_istream<CharT, Traits>::sentry ok(is);
+    if (ok) {
+      using num_get =
+          std::num_get<CharT, std::istreambuf_iterator<CharT, Traits>>;
+      std::ios_base::iostate state = std::ios_base::goodbit;
+      float f                      = 0.f;
+      std::use_facet<num_get>(is.getloc())
+          .get(std::istreambuf_iterator<CharT, Traits>(is),
+               std::istreambuf_iterator<CharT, Traits>(), is, state, f);
+      const floating_point_wrapper max(
+          Kokkos::Experimental::finite_max_v<floating_point_wrapper>);
+      if (f < -static_cast<float>(max)) {
+        state |= std::ios_base::failbit;
+        x = -max;
+      } else if (static_cast<float>(max) < f) {
+        state |= std::ios_base::failbit;
+        x = max;
+      } else {
+        x = f;
+      }
+      is.setstate(state);
+    }
     return is;
   }
 };
