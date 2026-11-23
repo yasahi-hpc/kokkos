@@ -1259,7 +1259,52 @@ breaks users and needs a deprecation cycle. Record it as a known divergence; the
 half-specific part is CH2.
 
 **A8. Deprecate the `std::complex` interop except the converting constructor (D11;
-planned 2026-11-22).** Independent of Parts B and C; tested with float/double.
+planned 2026-11-22; IMPLEMENTED 2026-11-24).** Independent of Parts B and C; tested with float/double.
+
+*A8 status (2026-11-24): implemented as designed below; verified here and on the A100;
+the std-backend half part is to run on Aurora.*
+- **Verified:**
+  - host, GCC 12 (`half_t` = float): deprecated code ON: 27 `*complex*:*atomic*` tests
+    pass (25 before, plus the two new ones), 0 warnings; OFF (Kokkos 6 state): 26 pass,
+    0 warnings, so nothing outside the deprecated test needs the removed interop;
+  - CUDA: the complex test objects compile with 0 `warning #` (nvcc honours the
+    suppression); A100 job 10415439: 27/27 on Serial and on Cuda, including
+    `complex_std_interop_deprecated` for the native `half_t`/`bhalf_t`.
+- **Code** (`Kokkos_Complex.hpp`): I1, I4, I5, I6, I7 under
+  `#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5` with `KOKKOS_DEPRECATED_WITH_COMMENT`
+  naming the replacement. I2 and I3: the non-template overloads are removed; under
+  `KOKKOS_ENABLE_DEPRECATED_CODE_5`, deprecated templates take a `std::complex<U>` with
+  `U != RealType` that converts implicitly to `std::complex<RealType>`. I0 unchanged.
+- **Probe, real header** (GCC 12, `a8probe.cpp`, the 21 cases of the table below):
+  deprecated code ON: cases 1-6 and 19-21 compile silently, 7-16 with exactly one
+  deprecation warning each, 17-18 do not compile (as today); deprecated code OFF
+  (`-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF`): exactly 7-16 fail. As designed.
+- **Tests** (`TestComplex.hpp`):
+  - `complex_construction`'s interop block is gone; its checks moved to the two new
+    tests;
+  - `CHECK_COMPLEX_NEAR` converts a `Kokkos::complex` reference from its parts
+    (`complex_near_ref`);
+  - `Kokkos::exp(std::complex)` became `Kokkos::exp(Kokkos::complex<double>(a))`;
+  - the `std::complex * Kokkos::complex` checks (multiplication recovery,
+    `static_assert`) are under `KOKKOS_ENABLE_DEPRECATED_CODE_5` with
+    `KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_PUSH/POP`;
+  - new `complex_std_interop_converting_ctor` (float, double): I0 in copy-init,
+    direct-init, as a call argument, `= += -= *= /=`, and the braced assignment;
+  - new `complex_std_interop_deprecated` (deprecated code only, warnings suppressed):
+    I1 (copy-, direct-init, assignment), I6, I4/I5 both orders, I7 (float, double; with
+    a tolerance, since its textbook formula differs from `exp(complex)`), and the mixed
+    I2/I3 (double from `std::complex<float>`); for `half_t`/`bhalf_t` too where they
+    are native types.
+  - The test file compiles without a warning with deprecated code ON and OFF (GCC 12).
+- **CHANGELOG: not edited.** Reconciled with the repository: Kokkos writes
+  `CHANGELOG.md` at release time from the merged PRs (every entry carries a PR number;
+  this branch has never edited it). The entry for the PR description instead:
+  "Deprecate the interop between `Kokkos::complex` and `std::complex` except the
+  converting constructor: the conversion operator to `std::complex`, `==`/`!=` with a
+  `std::complex` operand, `std::complex * Kokkos::complex`, `exp(std::complex)`, and
+  assignment and division assignment from a `std::complex` of another value type".
+- **Script:** `run_std_half_fp16.sh` takes `DEPRECATED_CODE=OFF` (build directories
+  `..._nodep`) for the Kokkos 6 state on the std half backend.
 
 *Inventory* (`core/src/Kokkos_Complex.hpp` at `a6ad59faa`; the only other user in the
 repository is `core/unit_test/TestComplex.hpp`):
@@ -2697,12 +2742,13 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~**Optimized builds** (`BUILD_TYPE=Release`, `-O3`) on Aurora~~ | done 2026-11-24, job 9120562: all pass, 0 warnings; the native builds contract half expressions into FMAs (strict and GNU dialect), which changes `std::float16_t`/`half_t` probe values but not Kokkos's complex results (§8.2) | Aurora |
 | Optional: optimized builds on Grace (`qsub -l walltime=2:00:00 -v BUILD_TYPE=Release run_std_half_fp16_grace.sh`); expected the same picture (half `fmadd`, seen at `-O2` in `aarch64_tests.md` step 3) | optional | Grace |
 | Optional: complex functions vs `std::complex<std::float16_t>` over the `ch3acc` inputs (expected equal up to the last bit) | measurement (proposed) | GCC ≥ 13, both evaluation methods |
-| A8 (D11), half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and a build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF` | after A8 | GCC ≥ 13 |
+| A8 (D11), half part: `complex_std_interop_deprecated` with `half_t`/`bhalf_t` on libstdc++ (in the default run), and the Kokkos 6 state: `DEPRECATED_CODE=OFF` | A8 implemented 2026-11-24; to run on Aurora: `qsub run_std_half_fp16.sh` and `qsub -v DEPRECATED_CODE=OFF run_std_half_fp16.sh` | GCC ≥ 13 (Aurora) |
 | Pre-Ampere bf16 double rounding at run time (B4 notes) | known gap, unfixed | none of the available machines: needs an NVIDIA GPU older than sm_80 |
 
 Still open but testable **on this machine** (no other machine needed):
 - **A8** (D11): deprecation of the `std::complex` interop except the converting
-  constructor; planned 2026-11-22, not started.
+  constructor; implemented and verified 2026-11-24 (A100 job 10415439; host with
+  deprecated code ON and OFF). The std-backend half part: §8.5.
 - ~~B1/H16 runtime tests in `Kokkos_CoreUnitTest_{Serial,Cuda}1`~~: done 2026-11-22, job
   10397183, all 14 `*numeric_traits*` tests pass on Serial and Cuda.
 - **H17:** fixed on CUDA (see CH1 notes).

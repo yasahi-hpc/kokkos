@@ -69,6 +69,30 @@ since both compute in float. Multiplication and division are already settled.
 A host-only version with a `std::complex<std::float16_t>` reference column is needed
 first. Low priority.
 
+### 3. A8, half part: the deprecated `std::complex` interop on the std backend
+
+**What.** A8 (implemented 2026-11-24) deprecates every interop between
+`Kokkos::complex` and `std::complex` except the converting constructor
+(`complex_half.md`, D11 and A8). Its test `complex_std_interop_deprecated` also runs for
+`half_t`/`bhalf_t`, which on the std backend means `std::complex<half_t>` through
+libstdc++'s generic template. The Kokkos 6 state is a build with
+`-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF`.
+
+**Run on Aurora:**
+
+```bash
+qsub run_std_half_fp16.sh                          # deprecated code ON (default)
+qsub -v DEPRECATED_CODE=OFF run_std_half_fp16.sh   # Kokkos 6 state, build_std_half_*_nodep
+```
+
+The two can run at the same time (separate build directories).
+
+**Expected:** all builds `ok (0 warnings)`, all tests pass. The ON run's
+`*complex*:*atomic*` has 2 more tests than before (27): `complex_std_interop_converting_ctor`
+and `complex_std_interop_deprecated`. The OFF run has 26 (no deprecated test). A
+deprecation warning in an ON build would mean a test still uses deprecated interop
+outside the suppressed blocks.
+
 ## Future work
 
 | Task | Why not now |
@@ -77,7 +101,6 @@ first. Low priority.
 | Locale branch of `half_io`: reading with a decimal comma through the stream's locale | not a priority; no machine has `de_DE`/`fr_FR` UTF-8 locales (a user-built one via `localedef`/`LOCPATH` would do) |
 | Report the libstdc++ extraction deviation to GCC: on empty or whitespace-only input `operator>>(_Float16&)` assigns an uninitialized float, where C++23 leaves the value unchanged (GCC 14, 15, master) | external |
 | **CH4**: converting constructor from `std::complex<std::float16_t>` (constructor only, D11) | Kokkos's minimum is C++20, and `std::float16_t` needs C++23 (and GCC >= 13); pick up once C++23 is the minimum |
-| **A8**, half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and a build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF` | needs A8, the deprecation of the `std::complex` interop (D11); A8 itself is developed and tested on the A100 machine |
 
 Not listed here because they don't depend on C++23: HIP and SYCL validation, B4b on
 HIP/SYCL, the pre-Ampere bf16 gap, CH6.

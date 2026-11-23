@@ -74,27 +74,7 @@ struct TestComplexConstruction {
     ASSERT_EQ(h_results(7).imag(), 0.0);
     ASSERT_EQ(h_results(8).real(), RealType(8));
     ASSERT_EQ(h_results(8).imag(), 0.0);
-
-    // Copy construction conversion between
-    // Kokkos::complex and std::complex doesn't compile
-    // Compare through double: ASSERT_FLOAT_EQ does not accept half_t, and all
-    // values below are exactly representable down to bhalf_t.
-    Kokkos::complex<RealType> a(1.5, 2.5), b(3.25, 5.25), r_kk;
-    std::complex<RealType> sa(a), sb(3.25, 5.25), r;
-    r    = a;
-    r_kk = a;
-    ASSERT_EQ(static_cast<double>(r.real()), static_cast<double>(r_kk.real()));
-    ASSERT_EQ(static_cast<double>(r.imag()), static_cast<double>(r_kk.imag()));
-    r    = sb * a;
-    r_kk = b * a;
-    ASSERT_EQ(static_cast<double>(r.real()), static_cast<double>(r_kk.real()));
-    ASSERT_EQ(static_cast<double>(r.imag()), static_cast<double>(r_kk.imag()));
-    ASSERT_EQ(static_cast<double>(r.real()), -8.25);
-    ASSERT_EQ(static_cast<double>(r.imag()), 16.);
-    r    = sa;
-    r_kk = a;
-    ASSERT_EQ(static_cast<double>(r.real()), static_cast<double>(r_kk.real()));
-    ASSERT_EQ(static_cast<double>(r.imag()), static_cast<double>(r_kk.imag()));
+    // The interop with std::complex is tested in complex_std_interop_*.
   }
 
   KOKKOS_INLINE_FUNCTION
@@ -514,12 +494,24 @@ TEST(TEST_CATEGORY, complex_basic_math) {
 #endif
 }
 
+// The reference of CHECK_COMPLEX_NEAR as a std::complex<double>: a real
+// number, a std::complex<double>, or a Kokkos::complex (from its parts; its
+// conversion operator to std::complex is deprecated, D11).
+inline std::complex<double> complex_near_ref(double x) { return x; }
+inline std::complex<double> complex_near_ref(std::complex<double> x) {
+  return x;
+}
+template <class T>
+std::complex<double> complex_near_ref(Kokkos::complex<T> x) {
+  return {static_cast<double>(x.real()), static_cast<double>(x.imag())};
+}
+
 // Compares a Kokkos::complex result with a std::complex<double> reference,
 // using a relative tolerance scaled by the modulus of the reference.
 // A macro rather than a function, so that gtest reports the line of each check.
 #define CHECK_COMPLEX_NEAR(value, ref, eps)                                     \
   do {                                                                          \
-    const std::complex<double> ref_ = (ref);                                    \
+    const std::complex<double> ref_ = complex_near_ref(ref);                    \
     const double tol_               = 10 * (eps)*std::max(1.0, std::abs(ref_)); \
     EXPECT_NEAR(static_cast<double>((value).real()), ref_.real(), tol_);        \
     EXPECT_NEAR(static_cast<double>((value).imag()), ref_.imag(), tol_);        \
@@ -556,7 +548,8 @@ struct TestComplexSpecialFunctions {
     CHECK_COMPLEX_NEAR(h_results(2), std::pow(a, c), eps);
     CHECK_COMPLEX_NEAR(h_results(3), std::abs(a), eps);
     CHECK_COMPLEX_NEAR(h_results(4), std::exp(a), eps);
-    CHECK_COMPLEX_NEAR(h_results(4), Kokkos::exp(a), eps);
+    CHECK_COMPLEX_NEAR(h_results(4), Kokkos::exp(Kokkos::complex<double>(a)),
+                       eps);
     CHECK_COMPLEX_NEAR(h_results(5), std::log(a), eps);
     CHECK_COMPLEX_NEAR(h_results(6), std::sin(a), eps);
     CHECK_COMPLEX_NEAR(h_results(7), std::cos(a), eps);
@@ -781,8 +774,9 @@ TEST(TEST_CATEGORY, complex_io_like_std) {
 #endif
 }
 
-// operator/=(std::complex<RealType>) is host-only, and divides like
-// operator/(complex, complex).
+// Division assignment by a std::complex<RealType> converts it with the
+// (host-only) converting constructor and divides like
+// operator/(complex, complex) (D11: no own overload any more).
 template <class RealType>
 void testComplexDivideAssignStdComplex() {
   using C = Kokkos::complex<RealType>;
@@ -796,6 +790,129 @@ TEST(TEST_CATEGORY, complex_divide_assign_std_complex) {
   testComplexDivideAssignStdComplex<float>();
   testComplexDivideAssignStdComplex<double>();
 }
+
+// Interop with std::complex (D11, A8). Only the converting constructor from
+// std::complex<RealType> stays: it is implicit, so a std::complex<RealType>
+// also works as a call argument, in assignment and in the compound
+// assignments. Everything else is deprecated in Kokkos 5 and removed in
+// Kokkos 6. float and double only: std::complex<half_t> is unspecified.
+template <class RealType>
+void testComplexStdInteropConvertingCtor() {
+  using C = Kokkos::complex<RealType>;
+  using S = std::complex<RealType>;
+  const S s(RealType(1.5), RealType(-2.5));
+  const C c(RealType(1.5), RealType(-2.5));
+  const C a = s;  // copy-initialization
+  const C b(s);   // direct-initialization
+  EXPECT_EQ(a, c);
+  EXPECT_EQ(b, c);
+  auto take = [](C z) { return z; };
+  EXPECT_EQ(take(s), c);  // call argument
+
+  C z(RealType(1), RealType(2));
+  z = s;
+  EXPECT_EQ(z, c);
+  z = C(RealType(1), RealType(2));
+  z += s;
+  EXPECT_EQ(z, C(RealType(2.5), RealType(-0.5)));
+  z = C(RealType(1), RealType(2));
+  z -= s;
+  EXPECT_EQ(z, C(RealType(-0.5), RealType(4.5)));
+  z = C(RealType(1), RealType(2));
+  z *= s;
+  EXPECT_EQ(z, C(RealType(1), RealType(2)) * c);
+  z = C(RealType(1), RealType(2));
+  z /= s;
+  EXPECT_EQ(z, C(RealType(1), RealType(2)) / c);
+
+  // Braced assignment: unambiguous since the std::complex overloads of
+  // operator= and operator/= are gone (they made both ambiguous).
+  z = {RealType(3), RealType(4)};
+  EXPECT_EQ(z, C(RealType(3), RealType(4)));
+  z /= {RealType(1), RealType(0)};
+  EXPECT_EQ(z, C(RealType(3), RealType(4)));
+}
+
+TEST(TEST_CATEGORY, complex_std_interop_converting_ctor) {
+  testComplexStdInteropConvertingCtor<float>();
+  testComplexStdInteropConvertingCtor<double>();
+}
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+// The deprecated interop still works until Kokkos 6, for the half types too
+// (where std::complex<half_t> is generic libstdc++ code).
+KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_PUSH()
+template <class RealType>
+void testComplexStdInteropDeprecated() {
+  using C = Kokkos::complex<RealType>;
+  using S = std::complex<RealType>;
+  // Compare through double: ASSERT_FLOAT_EQ does not accept half_t, and all
+  // values below are exactly representable down to bhalf_t.
+  auto same = [](const S &x, const C &y) {
+    return static_cast<double>(x.real()) == static_cast<double>(y.real()) &&
+           static_cast<double>(x.imag()) == static_cast<double>(y.imag());
+  };
+  const C a(RealType(1.5), RealType(2.5));
+  const C b(RealType(3.25), RealType(5.25));
+
+  // The conversion operator to std::complex (copy- and direct-init,
+  // assignment).
+  const S sa = a;
+  const S sd(a);
+  S r;
+  r = a;
+  EXPECT_TRUE(same(sa, a));
+  EXPECT_TRUE(same(sd, a));
+  EXPECT_TRUE(same(r, a));
+
+  // std::complex * Kokkos::complex.
+  const S sb(b.real(), b.imag());
+  const C p = sb * a;
+  EXPECT_EQ(p, b * a);
+  EXPECT_EQ(static_cast<double>(p.real()), -8.25);
+  EXPECT_EQ(static_cast<double>(p.imag()), 16.);
+
+  // == and != with std::complex, both orders.
+  EXPECT_TRUE(sa == a);
+  EXPECT_TRUE(a == sa);
+  EXPECT_FALSE(sa != a);
+  EXPECT_TRUE(a != sb);
+
+  if constexpr (std::is_floating_point_v<RealType>) {
+    // exp of a std::complex: the textbook formula, so compare with a
+    // tolerance with exp(complex), whose algorithm differs (A6).
+    const C e  = Kokkos::exp(sa);
+    const C ek = Kokkos::exp(a);
+    const RealType tol =
+        8 * Kokkos::Experimental::epsilon_v<RealType> * Kokkos::abs(ek);
+    EXPECT_NEAR(e.real(), ek.real(), tol);
+    EXPECT_NEAR(e.imag(), ek.imag(), tol);
+  }
+  if constexpr (std::is_same_v<RealType, double>) {
+    // Assignment and division assignment from a std::complex of another
+    // value type (std::complex<float> converts to std::complex<double>).
+    const std::complex<float> f(1.5f, -2.5f);
+    C z;
+    z = f;
+    EXPECT_EQ(z, C(1.5, -2.5));
+    z = C(1, 2);
+    z /= f;
+    EXPECT_EQ(z, C(1, 2) / C(1.5, -2.5));
+  }
+}
+KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_POP()
+
+TEST(TEST_CATEGORY, complex_std_interop_deprecated) {
+  testComplexStdInteropDeprecated<float>();
+  testComplexStdInteropDeprecated<double>();
+#if defined(KOKKOS_HAS_NATIVE_HALF_TYPE)
+  testComplexStdInteropDeprecated<Kokkos::Experimental::half_t>();
+#endif
+#if defined(KOKKOS_HAS_NATIVE_BHALF_TYPE)
+  testComplexStdInteropDeprecated<Kokkos::Experimental::bhalf_t>();
+#endif
+}
+#endif
 
 // Complex division: special values required by C99 Annex G (G.5.2), operands
 // near the ends of the range, and mixed precision.  Each case is computed with
@@ -995,10 +1112,15 @@ struct TestComplexMultiplication {
       EXPECT_EQ(h_out(N - 1, j), h_formula(0));
     }
 
-    // std::complex * Kokkos::complex (host only) recovers the same way.
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+    // std::complex * Kokkos::complex (host only, deprecated) recovers the
+    // same way.
+    KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_PUSH()
     const C h = std::complex<RealType>(inf, nan) * C(1, 0);
+    KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_POP()
     EXPECT_EQ(h.real(), inf);
     EXPECT_TRUE(std::isnan(h.imag()));
+#endif
   }
 };
 
@@ -1981,9 +2103,13 @@ static_assert(2 * Kokkos::complex<double>(1, 2) ==
 static_assert(Kokkos::complex<float>(1, 2) - 1.0 ==
               Kokkos::complex<double>(0, 2));
 
-// std::complex times Kokkos::complex (host only).
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+// std::complex times Kokkos::complex (host only, deprecated).
+KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_PUSH()
 static_assert(std::complex<double>(1, 2) * Kokkos::complex<double>(3, 4) ==
               Kokkos::complex<double>(-5, 10));
+KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_POP()
+#endif
 
 // Division by a complex number in constant expressions.  Only finite operands
 // and a nonzero divisor are constant expressions (see Impl::complex_divide).

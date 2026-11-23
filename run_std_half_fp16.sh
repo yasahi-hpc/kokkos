@@ -46,6 +46,9 @@
 #                Release (-O3) is where GCC contracts expressions into FMAs, on CPUs
 #                with FMA (see c++23-tests.md).
 #   JOBS         build parallelism     (default: number of CPUs)
+#   DEPRECATED_CODE  OFF: configure with -DKokkos_ENABLE_DEPRECATED_CODE_5=OFF, the Kokkos 6
+#                state (A8: the deprecated std::complex interop is gone), in separate
+#                build directories build_std_half_<config>..._nodep (default: ON)
 #   ENABLE_OPENMP  ON: also enable the OpenMP backend; builds and runs
 #                Kokkos_CoreUnitTest_OpenMP_SmokeTest and Kokkos_CoreUnitTest_OpenMP too,
 #                in separate build directories build_std_half_<config>_omp (default:
@@ -90,6 +93,7 @@ BUILD_TYPE=${BUILD_TYPE:-Debug}
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 8)}
 FULL=${FULL:-OFF}
 ENABLE_OPENMP=${ENABLE_OPENMP:-OFF}
+DEPRECATED_CODE=${DEPRECATED_CODE:-ON}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 BACKENDS=Serial
 [ "$ENABLE_OPENMP" = ON ] && BACKENDS="Serial OpenMP"
@@ -163,6 +167,7 @@ if [ "$FULL" = ON ] && [ "${PBS_QUEUE:-}" = debug ]; then
   echo "WARNING: FULL=ON in the debug queue (1 hour at most) will likely run out of time;"
   echo "         submit runs longer than 1 hour to the capacity queue: qsub -q capacity -l walltime=3:00:00 ..."
 fi
+echo "deprecated code (Kokkos 5): $DEPRECATED_CODE"
 echo "backends: $BACKENDS$([ "$ENABLE_OPENMP" = ON ] && echo " (OMP_NUM_THREADS=$OMP_NUM_THREADS)"); FULL=$FULL"
 echo "logs:     $LOG_DIR"
 
@@ -282,7 +287,7 @@ for cfg in $CONFIGS; do
     gnu-native) ARCH_ARGS=("-DKokkos_ARCH_$ARCH=ON") EXT=ON ;;
     *) die "unknown config '$cfg' in CONFIGS (default, native, gnu, gnu-native)" ;;
   esac
-  B=$BUILD_ROOT/build_std_half_$cfg$([ "$ENABLE_OPENMP" = ON ] && echo _omp)$([ "$BUILD_TYPE" != Debug ] && echo "_${BUILD_TYPE,,}")
+  B=$BUILD_ROOT/build_std_half_$cfg$([ "$ENABLE_OPENMP" = ON ] && echo _omp)$([ "$BUILD_TYPE" != Debug ] && echo "_${BUILD_TYPE,,}")$([ "$DEPRECATED_CODE" = OFF ] && echo _nodep)
 
   echo "===== [$cfg] Configure ($BUILD_TYPE, ${BACKENDS// / + }, ${ARCH_ARGS[*]:-no Kokkos_ARCH}, CMAKE_CXX_EXTENSIONS=$EXT)"
   cmake -S "$KOKKOS_SRC" -B "$B" \
@@ -292,6 +297,7 @@ for cfg in $CONFIGS; do
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DKokkos_ENABLE_SERIAL=ON \
     -DKokkos_ENABLE_OPENMP="$ENABLE_OPENMP" \
+    -DKokkos_ENABLE_DEPRECATED_CODE_5="$DEPRECATED_CODE" \
     -DKokkos_ENABLE_TESTS=ON \
     -DKokkos_ENABLE_DEBUG="$([ "$BUILD_TYPE" = Debug ] && echo ON || echo OFF)" \
     "${ARCH_ARGS[@]}" \

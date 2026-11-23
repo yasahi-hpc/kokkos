@@ -434,15 +434,19 @@ class
       : re_(reinterpret_cast<const RealType (&)[2]>(src)[0]),
         im_(reinterpret_cast<const RealType (&)[2]>(src)[1]) {}
 
-  /// \brief Conversion operator to std::complex.
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+  /// \brief Conversion operator to std::complex (deprecated; D11).
   ///
-  /// This operator cannot be called in a CUDA device function,
+  /// Of the interop with std::complex only the converting constructor above
+  /// stays. This operator cannot be called in a CUDA device function,
   /// because std::complex's methods and nonmember functions are not
   /// marked as CUDA device functions.
-  // TODO: make explicit.  DJS 2019-08-28
+  KOKKOS_DEPRECATED_WITH_COMMENT(
+      "Use std::complex<RealType>(z.real(), z.imag()) instead.")
   operator std::complex<RealType>() const noexcept {
     return std::complex<RealType>(re_, im_);
   }
+#endif
 
   /// \brief Constructor that takes just the real part, and sets the
   ///   imaginary part to zero.
@@ -474,15 +478,24 @@ class
     return *this;
   }
 
-  /// \brief Assignment operator from std::complex.
-  ///
-  /// This constructor cannot be called in a CUDA device function,
-  /// because std::complex's methods and nonmember functions are not
-  /// marked as CUDA device functions.
-  complex& operator=(const std::complex<RealType>& src) noexcept {
-    *this = complex(src);
+  // Assignment from std::complex<RealType> needs no overload: the implicit
+  // converting constructor from std::complex<RealType> and the copy
+  // assignment do it (D11).
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+  /// \brief Assignment from a std::complex of another value type that
+  ///   converts implicitly to std::complex<RealType> (deprecated; D11).
+  template <class U>
+    requires(
+        !std::is_same_v<U, RealType> &&
+        std::is_convertible_v<const std::complex<U>&, std::complex<RealType>>)
+  KOKKOS_DEPRECATED_WITH_COMMENT(
+      "Convert to Kokkos::complex<RealType> first: "
+      "z = Kokkos::complex<RealType>(std::complex<RealType>(w)).") complex&
+  operator=(const std::complex<U>& src) noexcept {
+    *this = complex(std::complex<RealType>(src));
     return *this;
   }
+#endif
 
   //! The imaginary part of this complex number.
   KOKKOS_INLINE_FUNCTION
@@ -554,15 +567,26 @@ class
     return *this;
   }
 
-  /// \brief Division assignment from std::complex.
-  ///
-  /// This operator cannot be called in a CUDA device function,
-  /// because std::complex's methods and nonmember functions are not
-  /// marked as CUDA device functions.
-  constexpr complex& operator/=(const std::complex<RealType>& y) noexcept(
-      noexcept(RealType{} / RealType{})) {
-    return *this /= complex(y.real(), y.imag());
+  // Division assignment by std::complex<RealType> needs no overload: the
+  // implicit converting constructor and operator/=(const complex&) do it
+  // (D11).
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+  /// \brief Division assignment by a std::complex of another value type that
+  ///   converts implicitly to std::complex<RealType> (deprecated; D11).
+  template <class U>
+    requires(
+        !std::is_same_v<U, RealType> &&
+        std::is_convertible_v<const std::complex<U>&, std::complex<RealType>>)
+  KOKKOS_DEPRECATED_WITH_COMMENT(
+      "Convert to Kokkos::complex<RealType> first: "
+      "z /= "
+      "Kokkos::complex<RealType>(std::complex<RealType>(w))"
+      ".") constexpr complex&
+  operator/=(const std::complex<U>& y) noexcept(noexcept(RealType{} /
+                                                         RealType{})) {
+    return *this /= complex(RealType(y.real()), RealType(y.imag()));
   }
+#endif
 
   constexpr KOKKOS_INLINE_FUNCTION complex& operator/=(
       const RealType& src) noexcept(noexcept(RealType{} / RealType{})) {
@@ -655,23 +679,33 @@ KOKKOS_INLINE_FUNCTION constexpr bool operator==(
 
 // TODO (here and elsewhere) decide if we should convert to a Kokkos::complex
 //      and do the comparison in a device-marked function
-//! Binary == operator for std::complex complex.
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+//! Binary == operator for std::complex complex (deprecated; D11).
 template <class RealType1, class RealType2>
-inline bool operator==(std::complex<RealType1> const& x,
-                       complex<RealType2> const& y) noexcept {
+KOKKOS_DEPRECATED_WITH_COMMENT(
+    "Convert the std::complex operand to Kokkos::complex.")
+inline bool
+operator==(std::complex<RealType1> const& x,
+           complex<RealType2> const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x.real()) == common_type(y.real()) &&
          common_type(x.imag()) == common_type(y.imag());
 }
+#endif
 
-//! Binary == operator for complex std::complex.
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+//! Binary == operator for complex std::complex (deprecated; D11).
 template <class RealType1, class RealType2>
-inline bool operator==(complex<RealType1> const& x,
-                       std::complex<RealType2> const& y) noexcept {
+KOKKOS_DEPRECATED_WITH_COMMENT(
+    "Convert the std::complex operand to Kokkos::complex.")
+inline bool
+operator==(complex<RealType1> const& x,
+           std::complex<RealType2> const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x.real()) == common_type(y.real()) &&
          common_type(x.imag()) == common_type(y.imag());
 }
+#endif
 
 //! Binary == operator for complex real.
 template <
@@ -706,23 +740,33 @@ KOKKOS_INLINE_FUNCTION constexpr bool operator!=(
          common_type(x.imag()) != common_type(y.imag());
 }
 
-//! Binary != operator for std::complex complex.
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+//! Binary != operator for std::complex complex (deprecated; D11).
 template <class RealType1, class RealType2>
-inline bool operator!=(std::complex<RealType1> const& x,
-                       complex<RealType2> const& y) noexcept {
+KOKKOS_DEPRECATED_WITH_COMMENT(
+    "Convert the std::complex operand to Kokkos::complex.")
+inline bool
+operator!=(std::complex<RealType1> const& x,
+           complex<RealType2> const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x.real()) != common_type(y.real()) ||
          common_type(x.imag()) != common_type(y.imag());
 }
+#endif
 
-//! Binary != operator for complex std::complex.
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+//! Binary != operator for complex std::complex (deprecated; D11).
 template <class RealType1, class RealType2>
-inline bool operator!=(complex<RealType1> const& x,
-                       std::complex<RealType2> const& y) noexcept {
+KOKKOS_DEPRECATED_WITH_COMMENT(
+    "Convert the std::complex operand to Kokkos::complex.")
+inline bool
+operator!=(complex<RealType1> const& x,
+           std::complex<RealType2> const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x.real()) != common_type(y.real()) ||
          common_type(x.imag()) != common_type(y.imag());
 }
+#endif
 
 //! Binary != operator for complex real.
 template <
@@ -832,7 +876,8 @@ operator*(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
   return complex<common_real_type>(re, im);
 }
 
-/// \brief Binary * operator for std::complex and complex.
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+/// \brief Binary * operator for std::complex and complex (deprecated; D11).
 ///
 /// This needs to exist because template parameters can't be deduced when
 /// conversions occur.  We could probably fix this using hidden friends patterns
@@ -841,6 +886,7 @@ operator*(const complex<RealType1>& x, const complex<RealType2>& y) noexcept {
 /// std::complex's methods and nonmember functions are not marked as
 /// CUDA device functions.
 template <class RealType1, class RealType2>
+KOKKOS_DEPRECATED_WITH_COMMENT("Use Kokkos::complex(x) * y instead.")
 constexpr complex<std::common_type_t<RealType1, RealType2>> operator*(
     const std::complex<RealType1>& x, const complex<RealType2>& y) {
   using common_real_type = std::common_type_t<RealType1, RealType2>;
@@ -850,6 +896,7 @@ constexpr complex<std::common_type_t<RealType1, RealType2>> operator*(
                                            y.imag(), re, im);
   return complex<common_real_type>(re, im);
 }
+#endif
 
 /// \brief Binary * operator for RealType times complex.
 ///
@@ -1610,14 +1657,20 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> atan(
   }
 }
 
-/// This function cannot be called in a CUDA device function,
-/// because std::complex's methods and nonmember functions are not
-/// marked as CUDA device functions.
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+/// exp of a std::complex, as a Kokkos::complex (deprecated; D11). It uses the
+/// textbook formula, without the special values of exp(complex) (A6). This
+/// function cannot be called in a CUDA device function, because
+/// std::complex's methods and nonmember functions are not marked as CUDA
+/// device functions.
 template <class RealType>
+KOKKOS_DEPRECATED_WITH_COMMENT(
+    "Use Kokkos::exp(Kokkos::complex<RealType>(z)) or std::exp(z) instead.")
 inline complex<RealType> exp(const std::complex<RealType>& c) {
   return complex<RealType>(std::exp(c.real()) * std::cos(c.imag()),
                            std::exp(c.real()) * std::sin(c.imag()));
 }
+#endif
 
 //! Binary operator / for complex and real numbers
 template <class RealType1, class RealType2>
