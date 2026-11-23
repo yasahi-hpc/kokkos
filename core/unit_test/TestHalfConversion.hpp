@@ -330,9 +330,10 @@ void test_half_cast_overloads() {
   EXPECT_EQ(errors, 0);
 }
 
-// constexpr half_t and bhalf_t on the std backend (B4a): conversions,
-// arithmetic, comparisons, compound assignment and the numeric-trait constants
-// are constant expressions. Not on CUDA, HIP and SYCL (B4b, future work).
+// constexpr half_t and bhalf_t on the std backend (B4a) and on CUDA (B4b-CUDA):
+// conversions, arithmetic, comparisons, compound assignment and the
+// numeric-trait constants are constant expressions. Not on HIP and SYCL (future
+// work).
 #ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
 template <class H>
 constexpr H half_constexpr_compound() {
@@ -371,6 +372,81 @@ static_assert(half_constexpr_checks<Kokkos::Experimental::half_t>());
 static_assert(half_constexpr_checks<Kokkos::Experimental::bhalf_t>());
 #endif
 #endif
+
+// The conversions used during constant evaluation (Impl::half_constexpr_from,
+// Impl::half_constexpr_to; the software path on CUDA) agree with the run-time
+// conversions bit for bit, on the host and in a kernel: every bit pattern
+// (decoded, and encoded back), the exact midpoints between neighbours and the
+// doubles next to them (where rounding through float would round twice), and
+// 64-bit integers. NaNs are not compared (their bits are not specified).
+#if defined(KOKKOS_IMPL_HALF_IS_CONSTEXPR)
+template <class H>
+KOKKOS_FUNCTION int check_half_constexpr_path(std::uint32_t i) {
+  namespace KEI = Kokkos::Experimental::Impl;
+  int err       = 0;
+  const auto u  = static_cast<std::uint16_t>(i);
+  const H h     = Kokkos::bit_cast<H>(u);
+  const float f = static_cast<float>(h);
+  if (f != f) return 0;
+  err += Kokkos::bit_cast<std::uint32_t>(KEI::half_constexpr_to<float>(h)) !=
+         Kokkos::bit_cast<std::uint32_t>(f);
+  err += Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(f)) != u;
+  const auto u1   = static_cast<std::uint16_t>(u + 1);
+  const float f1  = static_cast<float>(Kokkos::bit_cast<H>(u1));
+  const bool both = (u & 0x7fff) != 0x7fff && Kokkos::isfinite(f) &&
+                    Kokkos::isfinite(f1) && ((u ^ u1) & 0x8000) == 0;
+  if (both) {
+    const double mid = (static_cast<double>(f) + static_cast<double>(f1)) / 2;
+    const auto mb    = Kokkos::bit_cast<std::uint64_t>(mid);
+    for (double d : {mid, Kokkos::bit_cast<double>(mb - 1),
+                     Kokkos::bit_cast<double>(mb + 1)}) {
+      err += Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(d)) !=
+             Kokkos::bit_cast<std::uint16_t>(H(d));
+    }
+  }
+  if (i < 64) {  // 64-bit integers around 2^i, with low bits set
+    const long long v =
+        static_cast<long long>((1ull << (i % 63)) | (1ull << (i % 63) / 2) | 1);
+    for (long long w : {v, -v}) {
+      err += Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(w)) !=
+             Kokkos::bit_cast<std::uint16_t>(H(w));
+    }
+  }
+  return err;
+}
+
+template <class H>
+void test_half_constexpr_path() {
+  int host = 0;
+  for (std::uint32_t i = 0; i < 65536; ++i)
+    host += check_half_constexpr_path<H>(i);
+  EXPECT_EQ(host, 0);
+  int device = 0;
+  Kokkos::parallel_reduce(
+      "TestHalfConstexprPath", Kokkos::RangePolicy<TEST_EXECSPACE>(0, 65536),
+      KOKKOS_LAMBDA(int i, int &err) {
+        err += check_half_constexpr_path<H>(static_cast<std::uint32_t>(i));
+      },
+      device);
+  EXPECT_EQ(device, 0);
+}
+#endif
+
+TEST(TEST_CATEGORY, half_constexpr_path_matches_runtime) {
+#if defined(KOKKOS_IMPL_HALF_IS_CONSTEXPR) && !KOKKOS_HALF_T_IS_FLOAT
+  test_half_constexpr_path<Kokkos::Experimental::half_t>();
+#else
+  GTEST_SKIP() << "half_t is not constexpr here";
+#endif
+}
+
+TEST(TEST_CATEGORY, bhalf_constexpr_path_matches_runtime) {
+#if defined(KOKKOS_IMPL_HALF_IS_CONSTEXPR) && !KOKKOS_BHALF_T_IS_FLOAT
+  test_half_constexpr_path<Kokkos::Experimental::bhalf_t>();
+#else
+  GTEST_SKIP() << "bhalf_t is not constexpr here";
+#endif
+}
 
 TEST(TEST_CATEGORY, half_cast_overloads) {
   test_half_cast_overloads<Kokkos::Experimental::half_t>();

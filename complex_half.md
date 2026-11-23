@@ -1642,7 +1642,7 @@ results and return types statically, the absence of `conj`/`proj(half_t)` and of
 `promote_2<half_t, bhalf_t>`, and runs `norm`, `arg` (including `arg(-0) = pi`) and
 mixed `pow` on the host and in a kernel.
 
-**B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — B4a IMPLEMENTED (2026-11-24); B4b, B4c FUTURE WORK.**
+**B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — B4a and B4b-CUDA IMPLEMENTED (2026-11-24); B4b-HIP, B4b-SYCL, B4c FUTURE WORK.**
 *B4a status (2026-11-24): implemented (`545a6aa5a`), verified on Aurora (job 9121273, see below).*
 - **Code:** `Kokkos_Half_FloatingPointWrapper.hpp` defines `KOKKOS_IMPL_HALF_CONSTEXPR`
   (`constexpr` when `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` or `..._BHALF_...` is
@@ -1675,7 +1675,61 @@ mixed `pow` on the host and in a kernel.
   jobs 10415251 (`*half*`: 12 pass, the 2 `*_io_vs_std` skip as without the std
   backend) and 10415253 (`*complex*:*atomic*`: 25/25 on Serial and Cuda).
 
-*The analysis and the verified CUDA prototype below are kept for B4b.*
+*B4b-CUDA status (2026-11-24): implemented and verified on the A100 (jobs 10415931-33).*
+Reconciled with the plan: the plan put the software path in the wrapper only, and
+said that adding it to each backend's `cast_to_half` would leave the 21 full-type
+branches non-`constexpr`. Both are needed. The declarations of the cast functions
+carry `KOKKOS_IMPL_HALF_CONSTEXPR`, so on CUDA their definitions must be `constexpr`
+too. And the full-type branches (device pass only) need their own fallback. So:
+- **Macros** (`Kokkos_Half_FloatingPointWrapper.hpp`): `KOKKOS_IMPL_HALF_CONSTEXPR` and
+  `KOKKOS_IMPL_HALF_IS_CONSTEXPR` now also on CUDA. The new
+  `KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()` is `__builtin_is_constant_evaluated()` on CUDA
+  and `false` elsewhere, so the std backend is unchanged. HIP and SYCL are unchanged.
+- **Software conversions** (`Kokkos::Experimental::Impl`, in the wrapper header, from the
+  prototype): `half_constexpr_from<H>(T)` (round to nearest even, once, from
+  `float`/`double`/`bool`/any integer) and `half_constexpr_to<T>(H)` (exact to
+  `float`/`double`, toward zero to integers, as CUDA's `_rz`). They read and write the
+  bits with `__builtin_bit_cast`. NaN results are the canonical `0x7fff`.
+- **CUDA casts** (`Kokkos_Cuda_Half_Conversion.hpp`): all 66 non-identity
+  `cast_to_*`/`cast_from_*`, including the pre-Ampere bf16 ones, are `constexpr` and
+  begin with `if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) return Impl::half_constexpr_...;`.
+  At run time they still use the intrinsics.
+- **Wrapper:** the 21 full-type branches (`__half`'s own operators) run only outside
+  constant evaluation; there the float path is used (one rounding: exact for
+  `+ - * /`). The 8 compound assignments with `float`/`double` use the cast functions
+  during constant evaluation. The bit-pattern constructor uses `__builtin_bit_cast` on
+  CUDA too.
+- **Tests:** the B4a checks (`half_constexpr_checks`) and CH5
+  (`test_half_complex_in_constant_expression`) now also run on CUDA, being under
+  `KOKKOS_IMPL_HALF_IS_CONSTEXPR`. New `half_constexpr_path_matches_runtime` /
+  `bhalf_...` (`TestHalfConversion.hpp`, in `*half*`) compare the software path with the
+  run-time conversions bit for bit, on the host and in a kernel: all 65536 patterns
+  decoded and encoded back, the midpoints between neighbours and the doubles next to
+  them, and 64-bit integers. NaNs are not compared.
+- **Checked here:**
+  - nvcc 12.6 (`build_gpu` flags): a check file with the B4a assertions, CUDA-specific
+    cases (65520 → inf, the 64-bit bf16 case without double rounding) and a
+    `constexpr complex<half_t>` product compiles in both passes. The 221 objects of the
+    test executables compile with 0 `warning #`.
+  - The GCC 12 shim (std backend for `half_t`): unchanged, 27 complex tests pass, and
+    `half_constexpr_path_matches_runtime` passes against the native `_Float16`
+    conversions.
+  - Host (`half_t` = float): unchanged.
+- **Verified on the A100** (jobs 10415931, 10415932, 10415933):
+  - `*half*` 16 tests: 14 pass, including `half_constexpr_path_matches_runtime` and
+    `bhalf_constexpr_path_matches_runtime` on the host and the device; the 2
+    `*_io_vs_std` skip, as without the std backend. So the software path agrees with the
+    A100's conversions bit for bit on every pattern, midpoint and 64-bit integer.
+  - `*complex*:*atomic*` 27/27 on Serial and Cuda; `*numeric_traits*` 14 pass on
+    Serial1 and Cuda1 (the `std::numeric_limits` comparison skips without the std
+    backend).
+  - The executables were built from the new objects, so the B4a and CH5
+    `static_assert`s held in both nvcc passes.
+  - The first submission (jobs 10415877-79) failed before compiling: `cmake --build`
+    run from the `/home` symlink path had written that path into `build_gpu`'s build
+    files, which the compute nodes cannot see. Fixed by regenerating from `/work`.
+
+*The analysis and the verified CUDA prototype below are the basis of B4b-CUDA.*
 - **B4a, std backend.** Mark these `constexpr`:
   - the `Kokkos_STD_Half_Conversion.hpp:18-60` conversions;
   - the wrapper ctors (`:282-368`), comparisons (`:740-860`) and arithmetic, under
@@ -2123,7 +2177,7 @@ Trade-offs:
   `complex(const std::complex<RealType>&)`; the template replaces that one.
 - Prefer it to the half-only version if the D4 trait is in place.
 
-**CH5. `constexpr complex<half_t>` (needs B4a, and B4b for GPU backends). — std part IMPLEMENTED (2026-11-24); GPU part FUTURE WORK, with B4b.** Enable
+**CH5. `constexpr complex<half_t>` (needs B4a, and B4b for GPU backends). — std and CUDA parts IMPLEMENTED (2026-11-24); HIP and SYCL FUTURE WORK, with B4b.** Enable
 the `static_assert(... <half_t>())` lines in `TestComplex.hpp` under
 `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` (and for GPU backends once B4b exists). Keep the
 runtime twins elsewhere.
@@ -2760,6 +2814,6 @@ Still open but testable **on this machine** (no other machine needed):
 - ~~B1/H16 runtime tests in `Kokkos_CoreUnitTest_{Serial,Cuda}1`~~: done 2026-11-22, job
   10397183, all 14 `*numeric_traits*` tests pass on Serial and Cuda.
 - **H17:** fixed on CUDA (see CH1 notes).
-- **B4b-CUDA:** the prototype is verified, but the step is deferred with B4.
+- ~~**B4b-CUDA** (and CH5 on CUDA)~~: done 2026-11-24, verified on the A100 (jobs 10415931-33).
 - **CH6:** a benchmark of code bound by instruction issue, if paired `__half2` should be
   reconsidered.
