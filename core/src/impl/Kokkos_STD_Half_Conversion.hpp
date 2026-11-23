@@ -15,76 +15,95 @@
 namespace Kokkos {
 namespace Experimental {
 // cast_to_half
-inline half_t cast_to_half(float val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(bool val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(double val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(short val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(unsigned short val) {
+inline constexpr half_t cast_to_half(float val) {
   return half_t::impl_type(val);
 }
-inline half_t cast_to_half(int val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(unsigned int val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(long val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(unsigned long val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(long long val) { return half_t::impl_type(val); }
-inline half_t cast_to_half(unsigned long long val) {
+inline constexpr half_t cast_to_half(bool val) {
+  return half_t::impl_type(val);
+}
+inline constexpr half_t cast_to_half(double val) {
+  return half_t::impl_type(val);
+}
+inline constexpr half_t cast_to_half(short val) {
+  return half_t::impl_type(val);
+}
+inline constexpr half_t cast_to_half(unsigned short val) {
+  return half_t::impl_type(val);
+}
+inline constexpr half_t cast_to_half(int val) { return half_t::impl_type(val); }
+inline constexpr half_t cast_to_half(unsigned int val) {
+  return half_t::impl_type(val);
+}
+inline constexpr half_t cast_to_half(long val) {
+  return half_t::impl_type(val);
+}
+inline constexpr half_t cast_to_half(unsigned long val) {
+  return half_t::impl_type(val);
+}
+inline constexpr half_t cast_to_half(long long val) {
+  return half_t::impl_type(val);
+}
+inline constexpr half_t cast_to_half(unsigned long long val) {
   return half_t::impl_type(val);
 }
 // Declared in Kokkos_Half_FloatingPointWrapper.hpp and defined by every other
 // backend; reached by floating_point_wrapper::operator=(T) for T convertible to
 // half_t, e.g. a numeric-trait constant: h = Kokkos::infinity<half_t>::value.
-inline half_t cast_to_half(half_t val) { return val; }
+inline constexpr half_t cast_to_half(half_t val) { return val; }
 
 // cast_from_half
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, float>, T> cast_from_half(
+inline constexpr std::enable_if_t<std::is_same_v<T, float>, T> cast_from_half(
     half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, bool>, T> cast_from_half(half_t val) {
-  return static_cast<half_t::impl_type>(val);
-}
-template <typename T>
-inline std::enable_if_t<std::is_same_v<T, double>, T> cast_from_half(
+inline constexpr std::enable_if_t<std::is_same_v<T, bool>, T> cast_from_half(
     half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, short>, T> cast_from_half(
+inline constexpr std::enable_if_t<std::is_same_v<T, double>, T> cast_from_half(
     half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, unsigned short>, T> cast_from_half(
+inline constexpr std::enable_if_t<std::is_same_v<T, short>, T> cast_from_half(
     half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, int>, T> cast_from_half(half_t val) {
+inline constexpr std::enable_if_t<std::is_same_v<T, unsigned short>, T>
+cast_from_half(half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, unsigned int>, T> cast_from_half(
+inline constexpr std::enable_if_t<std::is_same_v<T, int>, T> cast_from_half(
     half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, long>, T> cast_from_half(half_t val) {
+inline constexpr std::enable_if_t<std::is_same_v<T, unsigned int>, T>
+cast_from_half(half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, unsigned long>, T> cast_from_half(
+inline constexpr std::enable_if_t<std::is_same_v<T, long>, T> cast_from_half(
     half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, long long>, T> cast_from_half(
-    half_t val) {
+inline constexpr std::enable_if_t<std::is_same_v<T, unsigned long>, T>
+cast_from_half(half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, unsigned long long>, T>
+inline constexpr std::enable_if_t<std::is_same_v<T, long long>, T>
+cast_from_half(half_t val) {
+  return static_cast<half_t::impl_type>(val);
+}
+template <typename T>
+inline constexpr std::enable_if_t<std::is_same_v<T, unsigned long long>, T>
 cast_from_half(half_t val) {
   return static_cast<half_t::impl_type>(val);
 }
@@ -102,85 +121,97 @@ namespace Experimental {
 // "'__bfloat16' is redefined from typedef 'short' to real '__bf16'".
 
 // cast_to_bhalf
-inline bhalf_t cast_to_bhalf(float val) { return bhalf_t::impl_type(val); }
-inline bhalf_t cast_to_bhalf(bool val) { return bhalf_t::impl_type(val); }
-inline bhalf_t cast_to_bhalf(double val) { return bhalf_t::impl_type(val); }
-inline bhalf_t cast_to_bhalf(short val) {
-  return bhalf_t::impl_type(static_cast<float>(val));
-}
-inline bhalf_t cast_to_bhalf(unsigned short val) {
-  return bhalf_t::impl_type(static_cast<float>(val));
-}
-inline bhalf_t cast_to_bhalf(int val) { return bhalf_t::impl_type(val); }
-inline bhalf_t cast_to_bhalf(unsigned int val) {
+inline constexpr bhalf_t cast_to_bhalf(float val) {
   return bhalf_t::impl_type(val);
 }
-inline bhalf_t cast_to_bhalf(long val) { return bhalf_t::impl_type(val); }
-inline bhalf_t cast_to_bhalf(unsigned long val) {
+inline constexpr bhalf_t cast_to_bhalf(bool val) {
   return bhalf_t::impl_type(val);
 }
-inline bhalf_t cast_to_bhalf(long long val) { return bhalf_t::impl_type(val); }
-inline bhalf_t cast_to_bhalf(unsigned long long val) {
+inline constexpr bhalf_t cast_to_bhalf(double val) {
+  return bhalf_t::impl_type(val);
+}
+inline constexpr bhalf_t cast_to_bhalf(short val) {
+  return bhalf_t::impl_type(static_cast<float>(val));
+}
+inline constexpr bhalf_t cast_to_bhalf(unsigned short val) {
+  return bhalf_t::impl_type(static_cast<float>(val));
+}
+inline constexpr bhalf_t cast_to_bhalf(int val) {
+  return bhalf_t::impl_type(val);
+}
+inline constexpr bhalf_t cast_to_bhalf(unsigned int val) {
+  return bhalf_t::impl_type(val);
+}
+inline constexpr bhalf_t cast_to_bhalf(long val) {
+  return bhalf_t::impl_type(val);
+}
+inline constexpr bhalf_t cast_to_bhalf(unsigned long val) {
+  return bhalf_t::impl_type(val);
+}
+inline constexpr bhalf_t cast_to_bhalf(long long val) {
+  return bhalf_t::impl_type(val);
+}
+inline constexpr bhalf_t cast_to_bhalf(unsigned long long val) {
   return bhalf_t::impl_type(val);
 }
 // See cast_to_half(half_t).
-inline bhalf_t cast_to_bhalf(bhalf_t val) { return val; }
+inline constexpr bhalf_t cast_to_bhalf(bhalf_t val) { return val; }
 
 // cast_from_bhalf
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, float>, T> cast_from_bhalf(
+inline constexpr std::enable_if_t<std::is_same_v<T, float>, T> cast_from_bhalf(
     bhalf_t val) {
   return static_cast<bhalf_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, bool>, T> cast_from_bhalf(
+inline constexpr std::enable_if_t<std::is_same_v<T, bool>, T> cast_from_bhalf(
     bhalf_t val) {
   return static_cast<bhalf_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, double>, T> cast_from_bhalf(
+inline constexpr std::enable_if_t<std::is_same_v<T, double>, T> cast_from_bhalf(
     bhalf_t val) {
   return static_cast<bhalf_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, short>, T> cast_from_bhalf(
+inline constexpr std::enable_if_t<std::is_same_v<T, short>, T> cast_from_bhalf(
     bhalf_t val) {
   return static_cast<T>(
       static_cast<float>(static_cast<bhalf_t::impl_type>(val)));
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, unsigned short>, T> cast_from_bhalf(
-    bhalf_t val) {
+inline constexpr std::enable_if_t<std::is_same_v<T, unsigned short>, T>
+cast_from_bhalf(bhalf_t val) {
   return static_cast<T>(
       static_cast<float>(static_cast<bhalf_t::impl_type>(val)));
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, int>, T> cast_from_bhalf(
+inline constexpr std::enable_if_t<std::is_same_v<T, int>, T> cast_from_bhalf(
     bhalf_t val) {
   return static_cast<bhalf_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, unsigned int>, T> cast_from_bhalf(
+inline constexpr std::enable_if_t<std::is_same_v<T, unsigned int>, T>
+cast_from_bhalf(bhalf_t val) {
+  return static_cast<bhalf_t::impl_type>(val);
+}
+template <typename T>
+inline constexpr std::enable_if_t<std::is_same_v<T, long>, T> cast_from_bhalf(
     bhalf_t val) {
   return static_cast<bhalf_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, long>, T> cast_from_bhalf(
-    bhalf_t val) {
+inline constexpr std::enable_if_t<std::is_same_v<T, unsigned long>, T>
+cast_from_bhalf(bhalf_t val) {
   return static_cast<bhalf_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, unsigned long>, T> cast_from_bhalf(
-    bhalf_t val) {
+inline constexpr std::enable_if_t<std::is_same_v<T, long long>, T>
+cast_from_bhalf(bhalf_t val) {
   return static_cast<bhalf_t::impl_type>(val);
 }
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, long long>, T> cast_from_bhalf(
-    bhalf_t val) {
-  return static_cast<bhalf_t::impl_type>(val);
-}
-template <typename T>
-inline std::enable_if_t<std::is_same_v<T, unsigned long long>, T>
+inline constexpr std::enable_if_t<std::is_same_v<T, unsigned long long>, T>
 cast_from_bhalf(bhalf_t val) {
   return static_cast<bhalf_t::impl_type>(val);
 }

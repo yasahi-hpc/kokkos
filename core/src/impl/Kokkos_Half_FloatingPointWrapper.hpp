@@ -24,6 +24,23 @@
 #include <impl/Kokkos_STD_Half_Impl_Type.hpp>
 #endif
 
+// constexpr half_t and bhalf_t (B4a). On the std backend (C++23
+// std::float16_t / std::bfloat16_t, which are arithmetic types) every
+// conversion, operator and comparison of the wrapper is a core-language
+// constant expression, so the wrapper's functions and the cast functions are
+// constexpr there; KOKKOS_IMPL_HALF_IS_CONSTEXPR tells tests (and CH5) that
+// half values can appear in constant expressions. The CUDA, HIP and SYCL types
+// are not constexpr (B4b, future work): KOKKOS_IMPL_HALF_CONSTEXPR is empty
+// there. Every declaration of a cast function carries it, as C++ requires of
+// constexpr functions.
+#if defined(KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT) || \
+    defined(KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT)
+#define KOKKOS_IMPL_HALF_IS_CONSTEXPR
+#define KOKKOS_IMPL_HALF_CONSTEXPR constexpr
+#else
+#define KOKKOS_IMPL_HALF_CONSTEXPR
+#endif
+
 namespace Kokkos::Experimental::Impl {
 /// @brief templated struct for determining if half_t is an alias to float.
 /// @tparam T The type to specialize on.
@@ -53,63 +70,69 @@ namespace Impl {
 template <>
 struct is_float16<half_t> : std::true_type {};
 }  // namespace Impl
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(float val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(bool val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(double val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(short val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(int val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(long val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(long long val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(unsigned short val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(unsigned int val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(unsigned long val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(unsigned long long val);
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(float val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(bool val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(double val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(short val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(int val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(long val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(long long val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(unsigned short val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(unsigned int val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(unsigned long val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(unsigned long long val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(half_t);
 
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, float>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, float>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, bool>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, bool>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, double>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, double>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, short>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, short>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, int>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, int>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, long>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, long>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, long long>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, long long>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, unsigned short>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, unsigned short>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, unsigned int>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, unsigned int>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, unsigned long>, T>
-    cast_from_half(half_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, unsigned long>, T>
+        cast_from_half(half_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
     std::enable_if_t<std::is_same_v<T, unsigned long long>, T>
         cast_from_half(half_t);
 
@@ -121,84 +144,96 @@ namespace Impl {
 template <>
 struct is_bfloat16<bhalf_t> : std::true_type {};
 }  // namespace Impl
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(float val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(bool val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(double val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(short val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(int val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(long val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(long long val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(unsigned short val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(unsigned int val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(unsigned long val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(unsigned long long val);
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(bhalf_t val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(float val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(bool val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(double val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(short val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(int val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(long val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(long long val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(unsigned short val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(unsigned int val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(unsigned long val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(unsigned long long val);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(bhalf_t val);
 
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, float>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, float>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, bool>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, bool>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, double>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, double>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, short>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, short>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, int>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, int>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, long>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, long>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, long long>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, long long>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, unsigned short>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, unsigned short>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, unsigned int>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, unsigned int>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<std::is_same_v<T, unsigned long>, T>
-    cast_from_bhalf(bhalf_t);
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    std::enable_if_t<std::is_same_v<T, unsigned long>, T>
+        cast_from_bhalf(bhalf_t);
 template <class T>
-KOKKOS_INLINE_FUNCTION
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
     std::enable_if_t<std::is_same_v<T, unsigned long long>, T>
         cast_from_bhalf(bhalf_t);
 #endif
 
 template <class T>
-static KOKKOS_INLINE_FUNCTION Kokkos::Experimental::half_t cast_to_wrapper(
-    T x, const Kokkos::Impl::half_impl_t::type&);
+static KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    Kokkos::Experimental::half_t
+    cast_to_wrapper(T x, const Kokkos::Impl::half_impl_t::type&);
 
 #if !KOKKOS_BHALF_T_IS_FLOAT
 template <class T>
-static KOKKOS_INLINE_FUNCTION Kokkos::Experimental::bhalf_t cast_to_wrapper(
-    T x, const Kokkos::Impl::bhalf_impl_t::type&);
+static KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    Kokkos::Experimental::bhalf_t
+    cast_to_wrapper(T x, const Kokkos::Impl::bhalf_impl_t::type&);
 #endif
 
 template <class T>
-static KOKKOS_INLINE_FUNCTION T
+static KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR T
 cast_from_wrapper(const Kokkos::Experimental::half_t& x);
 
 #if !KOKKOS_BHALF_T_IS_FLOAT
 template <class T>
-static KOKKOS_INLINE_FUNCTION T
+static KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR T
 cast_from_wrapper(const Kokkos::Experimental::bhalf_t& x);
 #endif
 /************************** END forward declarations **************************/
@@ -210,37 +245,44 @@ struct BitComparisonWrapper {
   std::uint16_t value;
 
   template <typename Number>
-  KOKKOS_FUNCTION friend bool operator==(BitComparisonWrapper a, Number b) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend bool operator==(
+      BitComparisonWrapper a, Number b) {
     return static_cast<FloatType>(a) == b;
   }
 
   template <typename Number>
-  KOKKOS_FUNCTION friend bool operator==(Number b, BitComparisonWrapper a) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend bool operator==(
+      Number b, BitComparisonWrapper a) {
     return static_cast<FloatType>(a) == b;
   }
 
   template <typename Number>
-  KOKKOS_FUNCTION friend bool operator!=(BitComparisonWrapper a, Number b) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend bool operator!=(
+      BitComparisonWrapper a, Number b) {
     return static_cast<FloatType>(a) != b;
   }
 
   template <typename Number>
-  KOKKOS_FUNCTION friend bool operator<(BitComparisonWrapper a, Number b) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend bool operator<(
+      BitComparisonWrapper a, Number b) {
     return static_cast<FloatType>(a) < b;
   }
 
   template <typename Number>
-  KOKKOS_FUNCTION friend bool operator<=(BitComparisonWrapper a, Number b) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend bool operator<=(
+      BitComparisonWrapper a, Number b) {
     return static_cast<FloatType>(a) <= b;
   }
 
   template <typename Number>
-  KOKKOS_FUNCTION friend bool operator>(BitComparisonWrapper a, Number b) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend bool operator>(
+      BitComparisonWrapper a, Number b) {
     return static_cast<FloatType>(a) > b;
   }
 
   template <typename Number>
-  KOKKOS_FUNCTION friend bool operator>=(BitComparisonWrapper a, Number b) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend bool operator>=(
+      BitComparisonWrapper a, Number b) {
     return static_cast<FloatType>(a) >= b;
   }
 };
@@ -280,48 +322,60 @@ class alignas(FloatType) floating_point_wrapper {
  public:
   // In-class initialization and defaulted default constructors not used
   // since Cuda supports half precision initialization via the below constructor
-  KOKKOS_FUNCTION
-  floating_point_wrapper() : val() {}
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper() : val() {}
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper(bit_comparison_type rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+  floating_point_wrapper(bit_comparison_type rhs)
+#ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
+      : val(__builtin_bit_cast(impl_type, rhs)){}
+#else
+  {
     val = Kokkos::bit_cast<impl_type>(rhs);
   }
+#endif
 
-  // Don't support implicit conversion back to impl_type.
-  // impl_type is a storage only type on host.
-  KOKKOS_FUNCTION
-  explicit operator impl_type() const { return val; }
-  KOKKOS_FUNCTION
-  explicit operator float() const { return cast_from_wrapper<float>(*this); }
-  KOKKOS_FUNCTION
-  explicit operator bool() const { return cast_from_wrapper<bool>(*this); }
-  KOKKOS_FUNCTION
-  explicit operator double() const { return cast_from_wrapper<double>(*this); }
-  KOKKOS_FUNCTION
-  explicit operator short() const { return cast_from_wrapper<short>(*this); }
-  KOKKOS_FUNCTION
-  explicit operator int() const { return cast_from_wrapper<int>(*this); }
-  KOKKOS_FUNCTION
-  explicit operator long() const { return cast_from_wrapper<long>(*this); }
-  KOKKOS_FUNCTION
-  explicit operator long long() const {
+        // Don't support implicit conversion back to impl_type.
+        // impl_type is a storage only type on host.
+        KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit
+        operator impl_type() const {
+    return val;
+  }
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator float() const {
+    return cast_from_wrapper<float>(*this);
+  }
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator bool() const {
+    return cast_from_wrapper<bool>(*this);
+  }
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator double() const {
+    return cast_from_wrapper<double>(*this);
+  }
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator short() const {
+    return cast_from_wrapper<short>(*this);
+  }
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator int() const {
+    return cast_from_wrapper<int>(*this);
+  }
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator long() const {
+    return cast_from_wrapper<long>(*this);
+  }
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator long long()
+      const {
     return cast_from_wrapper<long long>(*this);
   }
-  KOKKOS_FUNCTION
-  explicit operator unsigned short() const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator unsigned short()
+      const {
     return cast_from_wrapper<unsigned short>(*this);
   }
-  KOKKOS_FUNCTION
-  explicit operator unsigned int() const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator unsigned int()
+      const {
     return cast_from_wrapper<unsigned int>(*this);
   }
-  KOKKOS_FUNCTION
-  explicit operator unsigned long() const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit operator unsigned long()
+      const {
     return cast_from_wrapper<unsigned long>(*this);
   }
-  KOKKOS_FUNCTION
-  explicit operator unsigned long long() const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit
+  operator unsigned long long() const {
     return cast_from_wrapper<unsigned long long>(*this);
   }
 
@@ -341,37 +395,38 @@ class alignas(FloatType) floating_point_wrapper {
    */
   KOKKOS_FUNCTION
   constexpr floating_point_wrapper(impl_type rhs) : val(rhs) {}
-  KOKKOS_FUNCTION
-  floating_point_wrapper(float rhs) : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
-  floating_point_wrapper(double rhs) : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
-  explicit floating_point_wrapper(bool rhs)
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper(float rhs)
       : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
-  floating_point_wrapper(short rhs) : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
-  floating_point_wrapper(int rhs) : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
-  floating_point_wrapper(long rhs) : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
-  floating_point_wrapper(long long rhs) : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper(double rhs)
+      : val(cast_to_wrapper(rhs, val).val) {}
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR explicit floating_point_wrapper(
+      bool rhs)
+      : val(cast_to_wrapper(rhs, val).val) {}
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper(short rhs)
+      : val(cast_to_wrapper(rhs, val).val) {}
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper(int rhs)
+      : val(cast_to_wrapper(rhs, val).val) {}
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper(long rhs)
+      : val(cast_to_wrapper(rhs, val).val) {}
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+  floating_point_wrapper(long long rhs)
+      : val(cast_to_wrapper(rhs, val).val) {}
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
   floating_point_wrapper(unsigned short rhs)
       : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
   floating_point_wrapper(unsigned int rhs)
       : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
   floating_point_wrapper(unsigned long rhs)
       : val(cast_to_wrapper(rhs, val).val) {}
-  KOKKOS_FUNCTION
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
   floating_point_wrapper(unsigned long long rhs)
       : val(cast_to_wrapper(rhs, val).val) {}
 
   // Unary operators
-  KOKKOS_FUNCTION
-  floating_point_wrapper operator+() const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper
+  operator+() const {
     floating_point_wrapper tmp = *this;
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     tmp.val = +tmp.val;
@@ -381,8 +436,8 @@ class alignas(FloatType) floating_point_wrapper {
     return tmp;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper operator-() const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper
+  operator-() const {
     floating_point_wrapper tmp = *this;
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     tmp.val = -tmp.val;
@@ -393,8 +448,8 @@ class alignas(FloatType) floating_point_wrapper {
   }
 
   // Prefix operators
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator++() {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper&
+  operator++() {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     val = val + impl_type(1.0F);  // cuda has no operator++ for __nv_bfloat
 #else
@@ -405,8 +460,8 @@ class alignas(FloatType) floating_point_wrapper {
     return *this;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator--() {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper&
+  operator--() {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     val = val - impl_type(1.0F);  // cuda has no operator-- for __nv_bfloat
 #else
@@ -418,36 +473,37 @@ class alignas(FloatType) floating_point_wrapper {
   }
 
   // Postfix operators
-  KOKKOS_FUNCTION
-  floating_point_wrapper operator++(int) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper
+  operator++(int) {
     floating_point_wrapper tmp = *this;
     operator++();
     return tmp;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper operator--(int) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper
+  operator--(int) {
     floating_point_wrapper tmp = *this;
     operator--();
     return tmp;
   }
 
   // Binary operators
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator=(impl_type rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator=(
+      impl_type rhs) {
     val = rhs;
     return *this;
   }
 
   template <class T>
-  KOKKOS_FUNCTION floating_point_wrapper& operator=(T rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator=(
+      T rhs) {
     val = cast_to_wrapper(rhs, val).val;
     return *this;
   }
 
   // Compound operators
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator+=(floating_point_wrapper rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator+=(
+      floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     val = val + rhs.val;  // cuda has no operator+= for __nv_bfloat
 #else
@@ -461,29 +517,29 @@ class alignas(FloatType) floating_point_wrapper {
 
   // Compound operators: upcast overloads for +=
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator+=(T& lhs, floating_point_wrapper rhs) {
     lhs += static_cast<T>(rhs);
     return lhs;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator+=(float rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator+=(
+      float rhs) {
     float result = static_cast<float>(val) + rhs;
     val          = static_cast<impl_type>(result);
     return *this;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator+=(double rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator+=(
+      double rhs) {
     double result = static_cast<double>(val) + rhs;
     val           = static_cast<impl_type>(result);
     return *this;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator-=(floating_point_wrapper rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator-=(
+      floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     val = val - rhs.val;  // cuda has no operator-= for __nv_bfloat
 #else
@@ -497,29 +553,29 @@ class alignas(FloatType) floating_point_wrapper {
 
   // Compund operators: upcast overloads for -=
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator-=(T& lhs, floating_point_wrapper rhs) {
     lhs -= static_cast<T>(rhs);
     return lhs;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator-=(float rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator-=(
+      float rhs) {
     float result = static_cast<float>(val) - rhs;
     val          = static_cast<impl_type>(result);
     return *this;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator-=(double rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator-=(
+      double rhs) {
     double result = static_cast<double>(val) - rhs;
     val           = static_cast<impl_type>(result);
     return *this;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator*=(floating_point_wrapper rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator*=(
+      floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     val = val * rhs.val;  // cuda has no operator*= for __nv_bfloat
 #else
@@ -533,29 +589,29 @@ class alignas(FloatType) floating_point_wrapper {
 
   // Compund operators: upcast overloads for *=
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator*=(T& lhs, floating_point_wrapper rhs) {
     lhs *= static_cast<T>(rhs);
     return lhs;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator*=(float rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator*=(
+      float rhs) {
     float result = static_cast<float>(val) * rhs;
     val          = static_cast<impl_type>(result);
     return *this;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator*=(double rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator*=(
+      double rhs) {
     double result = static_cast<double>(val) * rhs;
     val           = static_cast<impl_type>(result);
     return *this;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator/=(floating_point_wrapper rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator/=(
+      floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     val = val / rhs.val;  // cuda has no operator/= for __nv_bfloat
 #else
@@ -569,31 +625,30 @@ class alignas(FloatType) floating_point_wrapper {
 
   // Compund operators: upcast overloads for /=
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator/=(T& lhs, floating_point_wrapper rhs) {
     lhs /= static_cast<T>(rhs);
     return lhs;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator/=(float rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator/=(
+      float rhs) {
     float result = static_cast<float>(val) / rhs;
     val          = static_cast<impl_type>(result);
     return *this;
   }
 
-  KOKKOS_FUNCTION
-  floating_point_wrapper& operator/=(double rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator/=(
+      double rhs) {
     double result = static_cast<double>(val) / rhs;
     val           = static_cast<impl_type>(result);
     return *this;
   }
 
   // Binary Arithmetic
-  KOKKOS_FUNCTION
-  friend floating_point_wrapper operator+(floating_point_wrapper lhs,
-                                          floating_point_wrapper rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend floating_point_wrapper
+  operator+(floating_point_wrapper lhs, floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     lhs += rhs;
 #else
@@ -607,22 +662,21 @@ class alignas(FloatType) floating_point_wrapper {
 
   // Binary Arithmetic upcast operators for +
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator+(floating_point_wrapper lhs, T rhs) {
     return T(lhs) + rhs;
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator+(T lhs, floating_point_wrapper rhs) {
     return lhs + T(rhs);
   }
 
-  KOKKOS_FUNCTION
-  friend floating_point_wrapper operator-(floating_point_wrapper lhs,
-                                          floating_point_wrapper rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend floating_point_wrapper
+  operator-(floating_point_wrapper lhs, floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     lhs -= rhs;
 #else
@@ -636,22 +690,21 @@ class alignas(FloatType) floating_point_wrapper {
 
   // Binary Arithmetic upcast operators for -
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator-(floating_point_wrapper lhs, T rhs) {
     return T(lhs) - rhs;
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator-(T lhs, floating_point_wrapper rhs) {
     return lhs - T(rhs);
   }
 
-  KOKKOS_FUNCTION
-  friend floating_point_wrapper operator*(floating_point_wrapper lhs,
-                                          floating_point_wrapper rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend floating_point_wrapper
+  operator*(floating_point_wrapper lhs, floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     lhs *= rhs;
 #else
@@ -665,22 +718,21 @@ class alignas(FloatType) floating_point_wrapper {
 
   // Binary Arithmetic upcast operators for *
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator*(floating_point_wrapper lhs, T rhs) {
     return T(lhs) * rhs;
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator*(T lhs, floating_point_wrapper rhs) {
     return lhs * T(rhs);
   }
 
-  KOKKOS_FUNCTION
-  friend floating_point_wrapper operator/(floating_point_wrapper lhs,
-                                          floating_point_wrapper rhs) {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend floating_point_wrapper
+  operator/(floating_point_wrapper lhs, floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     lhs /= rhs;
 #else
@@ -694,22 +746,21 @@ class alignas(FloatType) floating_point_wrapper {
 
   // Binary Arithmetic upcast operators for /
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator/(floating_point_wrapper lhs, T rhs) {
     return T(lhs) / rhs;
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
       std::is_same_v<T, float> || std::is_same_v<T, double>, T>
   operator/(T lhs, floating_point_wrapper rhs) {
     return lhs / T(rhs);
   }
 
   // Logical operators
-  KOKKOS_FUNCTION
-  bool operator!() const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator!() const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(!val);
 #else
@@ -718,8 +769,8 @@ class alignas(FloatType) floating_point_wrapper {
   }
 
   // NOTE: Loses short-circuit evaluation
-  KOKKOS_FUNCTION
-  bool operator&&(floating_point_wrapper rhs) const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator&&(
+      floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(val && rhs.val);
 #else
@@ -728,8 +779,8 @@ class alignas(FloatType) floating_point_wrapper {
   }
 
   // NOTE: Loses short-circuit evaluation
-  KOKKOS_FUNCTION
-  bool operator||(floating_point_wrapper rhs) const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator||(
+      floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(val || rhs.val);
 #else
@@ -738,8 +789,8 @@ class alignas(FloatType) floating_point_wrapper {
   }
 
   // Comparison operators
-  KOKKOS_FUNCTION
-  bool operator==(floating_point_wrapper rhs) const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator==(
+      floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(val == rhs.val);
 #else
@@ -747,8 +798,8 @@ class alignas(FloatType) floating_point_wrapper {
 #endif
   }
 
-  KOKKOS_FUNCTION
-  bool operator!=(floating_point_wrapper rhs) const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator!=(
+      floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(val != rhs.val);
 #else
@@ -756,8 +807,8 @@ class alignas(FloatType) floating_point_wrapper {
 #endif
   }
 
-  KOKKOS_FUNCTION
-  bool operator<(floating_point_wrapper rhs) const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator<(
+      floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(val < rhs.val);
 #else
@@ -765,8 +816,8 @@ class alignas(FloatType) floating_point_wrapper {
 #endif
   }
 
-  KOKKOS_FUNCTION
-  bool operator>(floating_point_wrapper rhs) const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator>(
+      floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(val > rhs.val);
 #else
@@ -774,8 +825,8 @@ class alignas(FloatType) floating_point_wrapper {
 #endif
   }
 
-  KOKKOS_FUNCTION
-  bool operator<=(floating_point_wrapper rhs) const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator<=(
+      floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(val <= rhs.val);
 #else
@@ -783,8 +834,8 @@ class alignas(FloatType) floating_point_wrapper {
 #endif
   }
 
-  KOKKOS_FUNCTION
-  bool operator>=(floating_point_wrapper rhs) const {
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator>=(
+      floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
     return static_cast<bool>(val >= rhs.val);
 #else
@@ -793,73 +844,73 @@ class alignas(FloatType) floating_point_wrapper {
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<std::is_convertible_v<T, float> &&
-                                              (std::is_same_v<T, float> ||
-                                               std::is_same_v<T, double>),
-                                          bool>
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
+      std::is_convertible_v<T, float> &&
+          (std::is_same_v<T, float> || std::is_same_v<T, double>),
+      bool>
   operator<(floating_point_wrapper lhs, T rhs) {
     return static_cast<float>(lhs) < rhs;
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<std::is_convertible_v<T, float> &&
-                                              (std::is_same_v<T, float> ||
-                                               std::is_same_v<T, double>),
-                                          bool>
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
+      std::is_convertible_v<T, float> &&
+          (std::is_same_v<T, float> || std::is_same_v<T, double>),
+      bool>
   operator<(T lhs, floating_point_wrapper rhs) {
     return lhs < static_cast<float>(rhs);
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<std::is_convertible_v<T, float> &&
-                                              (std::is_same_v<T, float> ||
-                                               std::is_same_v<T, double>),
-                                          bool>
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
+      std::is_convertible_v<T, float> &&
+          (std::is_same_v<T, float> || std::is_same_v<T, double>),
+      bool>
   operator>(floating_point_wrapper lhs, T rhs) {
     return static_cast<float>(lhs) > rhs;
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<std::is_convertible_v<T, float> &&
-                                              (std::is_same_v<T, float> ||
-                                               std::is_same_v<T, double>),
-                                          bool>
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
+      std::is_convertible_v<T, float> &&
+          (std::is_same_v<T, float> || std::is_same_v<T, double>),
+      bool>
   operator>(T lhs, floating_point_wrapper rhs) {
     return lhs > static_cast<float>(rhs);
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<std::is_convertible_v<T, float> &&
-                                              (std::is_same_v<T, float> ||
-                                               std::is_same_v<T, double>),
-                                          bool>
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
+      std::is_convertible_v<T, float> &&
+          (std::is_same_v<T, float> || std::is_same_v<T, double>),
+      bool>
   operator<=(floating_point_wrapper lhs, T rhs) {
     return static_cast<float>(lhs) <= rhs;
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<std::is_convertible_v<T, float> &&
-                                              (std::is_same_v<T, float> ||
-                                               std::is_same_v<T, double>),
-                                          bool>
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
+      std::is_convertible_v<T, float> &&
+          (std::is_same_v<T, float> || std::is_same_v<T, double>),
+      bool>
   operator<=(T lhs, floating_point_wrapper rhs) {
     return lhs <= static_cast<float>(rhs);
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<std::is_convertible_v<T, float> &&
-                                              (std::is_same_v<T, float> ||
-                                               std::is_same_v<T, double>),
-                                          bool>
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
+      std::is_convertible_v<T, float> &&
+          (std::is_same_v<T, float> || std::is_same_v<T, double>),
+      bool>
   operator>=(floating_point_wrapper lhs, T rhs) {
     return static_cast<float>(lhs) >= rhs;
   }
 
   template <class T>
-  KOKKOS_FUNCTION friend std::enable_if_t<std::is_convertible_v<T, float> &&
-                                              (std::is_same_v<T, float> ||
-                                               std::is_same_v<T, double>),
-                                          bool>
+  KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend std::enable_if_t<
+      std::is_convertible_v<T, float> &&
+          (std::is_same_v<T, float> || std::is_same_v<T, double>),
+      bool>
   operator>=(T lhs, floating_point_wrapper rhs) {
     return lhs >= static_cast<float>(rhs);
   }
@@ -914,28 +965,30 @@ class alignas(FloatType) floating_point_wrapper {
 
 // Declare wrapper overloads now that floating_point_wrapper is declared
 template <class T>
-static KOKKOS_INLINE_FUNCTION Kokkos::Experimental::half_t cast_to_wrapper(
-    T x, const Kokkos::Impl::half_impl_t::type&) {
+static KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    Kokkos::Experimental::half_t
+    cast_to_wrapper(T x, const Kokkos::Impl::half_impl_t::type&) {
   return Kokkos::Experimental::cast_to_half(x);
 }
 
 #if !KOKKOS_BHALF_T_IS_FLOAT
 template <class T>
-static KOKKOS_INLINE_FUNCTION Kokkos::Experimental::bhalf_t cast_to_wrapper(
-    T x, const Kokkos::Impl::bhalf_impl_t::type&) {
+static KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR
+    Kokkos::Experimental::bhalf_t
+    cast_to_wrapper(T x, const Kokkos::Impl::bhalf_impl_t::type&) {
   return Kokkos::Experimental::cast_to_bhalf(x);
 }
 #endif
 
 template <class T>
-static KOKKOS_INLINE_FUNCTION T
+static KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR T
 cast_from_wrapper(const Kokkos::Experimental::half_t& x) {
   return Kokkos::Experimental::cast_from_half<T>(x);
 }
 
 #if !KOKKOS_BHALF_T_IS_FLOAT
 template <class T>
-static KOKKOS_INLINE_FUNCTION T
+static KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR T
 cast_from_wrapper(const Kokkos::Experimental::bhalf_t& x) {
   return Kokkos::Experimental::cast_from_bhalf<T>(x);
 }
@@ -960,34 +1013,55 @@ namespace Experimental {
 using half_t = Kokkos::Impl::half_impl_t::type;
 
 // cast_to_half
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(float val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(bool val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(double val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(short val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(unsigned short val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(int val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(unsigned int val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(long val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(unsigned long val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(long long val) { return half_t(val); }
-KOKKOS_INLINE_FUNCTION
-half_t cast_to_half(unsigned long long val) { return half_t(val); }
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(float val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(bool val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(double val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(short val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(unsigned short val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(int val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(unsigned int val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(long val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(unsigned long val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(long long val) {
+  return half_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR half_t
+cast_to_half(unsigned long long val) {
+  return half_t(val);
+}
 
 // cast_from_half
 // Using an explicit list here too, since the other ones are explicit and for
 // example don't include char
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR std::enable_if_t<
     std::is_same_v<T, float> || std::is_same_v<T, bool> ||
         std::is_same_v<T, double> || std::is_same_v<T, short> ||
         std::is_same_v<T, unsigned short> || std::is_same_v<T, int> ||
@@ -1016,32 +1090,54 @@ namespace Experimental {
 using bhalf_t = Kokkos::Impl::bhalf_impl_t::type;
 
 // cast_to_bhalf
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(float val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(bool val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(double val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(short val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(unsigned short val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(int val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(unsigned int val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(long val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(unsigned long val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(long long val) { return bhalf_t(val); }
-KOKKOS_INLINE_FUNCTION
-bhalf_t cast_to_bhalf(unsigned long long val) { return bhalf_t(val); }
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(float val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(bool val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(double val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(short val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(unsigned short val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(int val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(unsigned int val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(long val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(unsigned long val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(long long val) {
+  return bhalf_t(val);
+}
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
+cast_to_bhalf(unsigned long long val) {
+  return bhalf_t(val);
+}
 
 // cast_from_bhalf
 template <class T>
-KOKKOS_INLINE_FUNCTION std::enable_if_t<
+KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR std::enable_if_t<
     std::is_same_v<T, float> || std::is_same_v<T, bool> ||
         std::is_same_v<T, double> || std::is_same_v<T, short> ||
         std::is_same_v<T, unsigned short> || std::is_same_v<T, int> ||

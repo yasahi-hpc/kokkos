@@ -68,6 +68,32 @@ since both compute in float. Multiplication and division are already settled.
 A host-only version with a `std::complex<std::float16_t>` reference column is needed
 first. Low priority.
 
+### 3. B4a and CH5: `constexpr` half and `constexpr complex<half_t>`
+
+**What.** Implemented 2026-11-24 (`complex_half.md`, B4 and CH5 notes):
+- **B4a:** on the std backend every function of `half_t`/`bhalf_t` is `constexpr`
+  (conversions, operators, comparisons, numeric-trait constants, the cast
+  functions). The feature macro `KOKKOS_IMPL_HALF_IS_CONSTEXPR` marks it. Nothing
+  changes on CUDA, HIP and SYCL.
+- **CH5 (std part):** the constant-expression checks of `Kokkos::complex` run for
+  `half_t` and `bhalf_t` too, plus a half version of the division check.
+
+**Checked here** only with a GCC 12 shim, for `half_t`: the `static_assert`s compile and
+the complex tests pass. `bhalf_t` needs GCC >= 13.
+
+**Run on Aurora** (and on Grace with `run_std_half_fp16_grace.sh`):
+
+```bash
+qsub run_std_half_fp16.sh
+```
+
+The tests are compile-time: `half_constexpr_checks` (`TestHalfConversion.hpp`, in
+`Kokkos_CoreUnitTest_Default`) and `test_half_complex_in_constant_expression`
+(`TestComplex.hpp`, in `Kokkos_CoreUnitTest_Serial_SmokeTest`). If a build of those
+targets succeeds, they pass. Expected: all builds `ok (0 warnings)`, all tests pass as
+before (25 / 15 / 14). A failure would be a `static assertion failed` or "is not a
+constant expression" error in the build log of one of those targets.
+
 ## Future work
 
 | Task | Why not now |
@@ -75,9 +101,7 @@ first. Low priority.
 | GCC 13 (only 14.2 and 15.2 tested) | no machine with GCC 13 |
 | Locale branch of `half_io`: reading with a decimal comma through the stream's locale | not a priority; no machine has `de_DE`/`fr_FR` UTF-8 locales (a user-built one via `localedef`/`LOCPATH` would do) |
 | Report the libstdc++ extraction deviation to GCC: on empty or whitespace-only input `operator>>(_Float16&)` assigns an uninitialized float, where C++23 leaves the value unchanged (GCC 14, 15, master) | external |
-| **B4a**: `constexpr` half on the std backend | library change (deferred with B4) |
-| **CH5** (std part): enable the half `static_assert`s in `TestComplex.hpp` | needs B4a |
-| **CH4**: converting constructor from `std::complex<std::float16_t>` (constructor only, D11) | library change |
+| **CH4**: converting constructor from `std::complex<std::float16_t>` (constructor only, D11) | Kokkos's minimum is C++20, and `std::float16_t` needs C++23 (and GCC >= 13); pick up once C++23 is the minimum |
 | **A8**, half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and a build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF` | needs A8, the deprecation of the `std::complex` interop (D11); A8 itself is developed and tested on the A100 machine |
 
 Not listed here because they don't depend on C++23: HIP and SYCL validation, B4b on

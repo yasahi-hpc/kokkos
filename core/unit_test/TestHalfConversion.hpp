@@ -207,31 +207,45 @@ void test_half_assign_trait_constants() {
 // cast_to_wrapper/cast_from_wrapper, called once with a value of 1. A backend
 // that declares one of them without defining it fails to link here (H18 was
 // such a case). Returns the number of wrong results.
-KOKKOS_FUNCTION inline Kokkos::Experimental::half_t cast_to(
-    Kokkos::Experimental::half_t *, Kokkos::Experimental::half_t x) {
+KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR inline Kokkos::Experimental::half_t
+cast_to(Kokkos::Experimental::half_t *, Kokkos::Experimental::half_t x) {
   return Kokkos::Experimental::cast_to_half(x);
 }
 template <class T>
-KOKKOS_FUNCTION Kokkos::Experimental::half_t cast_to(
+KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR Kokkos::Experimental::half_t cast_to(
     Kokkos::Experimental::half_t *, T x) {
   return Kokkos::Experimental::cast_to_half(x);
 }
 template <class T>
-KOKKOS_FUNCTION T cast_from(Kokkos::Experimental::half_t x) {
+KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR T
+cast_from(Kokkos::Experimental::half_t x) {
   return Kokkos::Experimental::cast_from_half<T>(x);
 }
 #if !KOKKOS_BHALF_T_IS_FLOAT
-KOKKOS_FUNCTION inline Kokkos::Experimental::bhalf_t cast_to(
-    Kokkos::Experimental::bhalf_t *, Kokkos::Experimental::bhalf_t x) {
+KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR inline Kokkos::Experimental::bhalf_t
+cast_to(Kokkos::Experimental::bhalf_t *, Kokkos::Experimental::bhalf_t x) {
   return Kokkos::Experimental::cast_to_bhalf(x);
 }
 template <class T>
-KOKKOS_FUNCTION Kokkos::Experimental::bhalf_t cast_to(
-    Kokkos::Experimental::bhalf_t *, T x) {
+KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR Kokkos::Experimental::bhalf_t
+cast_to(Kokkos::Experimental::bhalf_t *, T x) {
   return Kokkos::Experimental::cast_to_bhalf(x);
 }
 template <class T>
-KOKKOS_FUNCTION T cast_from(Kokkos::Experimental::bhalf_t x) {
+KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR T
+cast_from(Kokkos::Experimental::bhalf_t x) {
+  return Kokkos::Experimental::cast_from_bhalf<T>(x);
+}
+#endif
+#if KOKKOS_BHALF_T_IS_FLOAT && !KOKKOS_HALF_T_IS_FLOAT
+// bhalf_t is float while half_t is not (e.g. a std backend without
+// std::bfloat16_t): the bhalf casts work on float.
+template <class T>
+KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR float cast_to(float *, T x) {
+  return Kokkos::Experimental::cast_to_bhalf(x);
+}
+template <class T>
+KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR T cast_from(float x) {
   return Kokkos::Experimental::cast_from_bhalf<T>(x);
 }
 #endif
@@ -315,6 +329,48 @@ void test_half_cast_overloads() {
       errors);
   EXPECT_EQ(errors, 0);
 }
+
+// constexpr half_t and bhalf_t on the std backend (B4a): conversions,
+// arithmetic, comparisons, compound assignment and the numeric-trait constants
+// are constant expressions. Not on CUDA, HIP and SYCL (B4b, future work).
+#ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
+template <class H>
+constexpr H half_constexpr_compound() {
+  H h(1);
+  h += H(2);
+  h *= 2.f;
+  ++h;
+  h -= 1.0;
+  h /= H(2);
+  return h;  // ((1 + 2) * 2 + 1 - 1) / 2 = 3
+}
+
+template <class H>
+constexpr bool half_constexpr_checks() {
+  static_assert(H(1.5) + H(2.5) == H(4));
+  static_assert(H(1.5f) * H(2) == H(3.f));
+  static_assert(H(3) / H(2) == H(1.5));
+  static_assert(H(1) - H(3) == -H(2));
+  static_assert(-H(2) < H(1) && H(1) <= H(1) && H(2) > H(1) && H(2) != H(1));
+  static_assert(H(2) > 1.5f && 2.5 > H(2));
+  static_assert(static_cast<int>(H(7.75)) == 7);
+  static_assert(static_cast<double>(H(0.5)) == 0.5);
+  static_assert(static_cast<bool>(H(0.25)) && !H(0));
+  static_assert(half_constexpr_compound<H>() == H(3));
+  constexpr H inf(Kokkos::Experimental::infinity_v<H>);
+  constexpr H max(Kokkos::Experimental::finite_max_v<H>);
+  static_assert(inf > max && max > H(0));
+  static_assert(cast_to(static_cast<H *>(nullptr), 3) == H(3));
+  static_assert(cast_from<double>(H(0.5)) == 0.5);
+  return true;
+}
+#if !KOKKOS_HALF_T_IS_FLOAT
+static_assert(half_constexpr_checks<Kokkos::Experimental::half_t>());
+#endif
+#if !KOKKOS_BHALF_T_IS_FLOAT
+static_assert(half_constexpr_checks<Kokkos::Experimental::bhalf_t>());
+#endif
+#endif
 
 TEST(TEST_CATEGORY, half_cast_overloads) {
   test_half_cast_overloads<Kokkos::Experimental::half_t>();

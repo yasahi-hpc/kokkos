@@ -1891,9 +1891,11 @@ constexpr bool test_complex_conj() {
 static_assert(test_complex_conj<float>());
 static_assert(test_complex_conj<double>());
 
-// half_t and bhalf_t cannot be used in constant expressions: their conversions,
-// comparisons and arithmetic are not constexpr (e.g. CUDA __half intrinsics).
-// Run the checks above at runtime instead.
+// half_t and bhalf_t cannot be used in constant expressions on the CUDA, HIP
+// and SYCL backends: their conversions, comparisons and arithmetic are not
+// constexpr (e.g. CUDA __half intrinsics). Run the checks above at runtime
+// there (and everywhere, as a run-time check); on the std backend they also run
+// at compile time (CH5, below).
 template <class RealType>
 bool comparison_at_runtime() {
   return Kokkos::complex<RealType>{42., 43.} ==
@@ -2011,6 +2013,65 @@ static_assert(test_division_in_constant_expression<float>());
 static_assert(test_division_in_constant_expression<double>());
 static_assert(Kokkos::complex<float>(-5, 10) / Kokkos::complex<double>(3, 4) ==
               Kokkos::complex<double>(1, 2));
+
+// constexpr complex<half_t> and complex<bhalf_t> (CH5). On the std backend
+// (C++23 std::float16_t / std::bfloat16_t) half values are constant
+// expressions (B4a), so the checks above run for the half types too. The CUDA,
+// HIP and SYCL half types are not constexpr (B4b, future work): there only the
+// run-time twins below run.
+#ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
+// Division as above, with tolerances for the half types: the range checks of
+// test_division_in_constant_expression are tighter than half precision.
+template <class T>
+constexpr bool test_half_division_in_constant_expression() {
+  using C = Kokkos::complex<T>;
+  static_assert(C(T(-5), T(10)) / C(T(3), T(4)) == C(T(1), T(2)));  // |c|<|d|
+  static_assert(C(T(-2), T(11)) / C(T(4), T(3)) == C(T(1), T(2)));  // |c|>=|d|
+  static_assert(T(25) / C(T(3), T(4)) == C(T(3), T(-4)));
+
+  C z(T(-2), T(11));
+  z /= C(T(4), T(3));
+  if (z != C(T(1), T(2))) return false;
+
+  // The largest and the smallest normal values: half division computes in
+  // float (CH3), so neither overflows nor underflows.
+  constexpr T big(Kokkos::Experimental::finite_max_v<T>);
+  static_assert(C(big, big) / C(big, big) == C(T(1), T(0)));
+  constexpr T m(Kokkos::Experimental::norm_min_v<T>);
+  constexpr C r = C(T(1), T(1)) / C(T(4) * m, T(2) * m);  // (0.3 + 0.1i) / m
+  constexpr float e =
+      2 * static_cast<float>(T(Kokkos::Experimental::epsilon_v<T>));
+  constexpr float re = static_cast<float>(r.real()) * static_cast<float>(m);
+  constexpr float im = static_cast<float>(r.imag()) * static_cast<float>(m);
+  static_assert(re > 0.3f * (1 - e) && re < 0.3f * (1 + e));
+  static_assert(im > 0.1f * (1 - e) && im < 0.1f * (1 + e));
+  return true;
+}
+
+template <class T>
+constexpr bool test_half_complex_in_constant_expression() {
+  static_assert(can_appear_in_constant_expressions<T>());
+  static_assert(comparison_in_constant_expression<T>());
+  static_assert(test_complex_norm<T>());
+  static_assert(test_complex_conj<T>());
+  static_assert(test_arithmetic_in_constant_expression<T>());
+  static_assert(test_half_division_in_constant_expression<T>());
+  // Conversions between the complex types (CH2) in constant expressions.
+  using CH = Kokkos::complex<T>;
+  static_assert(Kokkos::complex<float>(CH(T(1.5), T(-2))) ==
+                Kokkos::complex<float>(1.5f, -2.f));
+  static_assert(CH(Kokkos::complex<double>(0.5, 4)) == CH(T(0.5), T(4)));
+  return true;
+}
+#if !KOKKOS_HALF_T_IS_FLOAT
+static_assert(
+    test_half_complex_in_constant_expression<Kokkos::Experimental::half_t>());
+#endif
+#if !KOKKOS_BHALF_T_IS_FLOAT
+static_assert(
+    test_half_complex_in_constant_expression<Kokkos::Experimental::bhalf_t>());
+#endif
+#endif  // KOKKOS_IMPL_HALF_IS_CONSTEXPR
 
 // Compile-time and run-time division agree (up to contraction at run time).
 TEST(TEST_CATEGORY, complex_division_constexpr_matches_runtime) {

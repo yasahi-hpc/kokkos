@@ -1589,10 +1589,32 @@ results and return types statically, the absence of `conj`/`proj(half_t)` and of
 `promote_2<half_t, bhalf_t>`, and runs `norm`, `arg` (including `arg(-0) = pi`) and
 mixed `pow` on the host and in a kernel.
 
-**B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — FUTURE WORK (decided 2026-11-22).**
-*Not implemented. Part C proceeds without it: `constexpr` checks stay
-float/double-only, with runtime twins for half (D6). CH5 is future work with it.
-The analysis and the verified CUDA prototype below are kept for when B4 is picked up.*
+**B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — B4a IMPLEMENTED (2026-11-24); B4b, B4c FUTURE WORK.**
+*B4a status (2026-11-24): implemented, compile-checked here, to verify on Aurora.*
+- **Code:** `Kokkos_Half_FloatingPointWrapper.hpp` defines `KOKKOS_IMPL_HALF_CONSTEXPR`
+  (`constexpr` when `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` or `..._BHALF_...` is
+  defined, else empty) and the feature macro `KOKKOS_IMPL_HALF_IS_CONSTEXPR`. Every
+  function of the wrapper (constructors, conversions, unary, compound and binary
+  operators, comparisons, the `BitComparisonWrapper` comparisons),
+  `cast_to_wrapper`/`cast_from_wrapper`, every declaration of the cast functions (C++
+  requires `constexpr` on all declarations of a function) and the float fallback carry
+  it; the definitions in `Kokkos_STD_Half_Conversion.hpp` are `constexpr`. The
+  bit-pattern constructor (numeric-trait constants) uses `__builtin_bit_cast` on the std
+  backend, since `Kokkos::bit_cast` (`memcpy`) is not `constexpr`. The stream operators
+  stay non-`constexpr`. On CUDA, HIP and SYCL the macro is empty: no change there.
+- **Test:** `half_constexpr_checks<H>()` in `TestHalfConversion.hpp`, `static_assert`ed
+  for `half_t` and `bhalf_t` under `KOKKOS_IMPL_HALF_IS_CONSTEXPR`: arithmetic,
+  comparisons (also with `float`/`double`), conversions to `int`/`double`/`bool`, `!`,
+  compound assignment and `++`, the trait constants `infinity_v`/`finite_max_v`, and the
+  cast functions.
+- **Checked here** with a GCC 12 shim that selects the std backend for `half_t`
+  (`-D__STDCPP_FLOAT16_T__=1` and a stand-in `<stdfloat>` with `std::float16_t =
+  _Float16` and float-based `<cmath>` overloads, which GCC 12's libstdc++ lacks): the
+  B4a and CH5 `static_assert`s compile (a planted false assertion fails, so they are
+  evaluated), and `*complex*:*atomic*` passes (25). `bhalf_t` is `float` in the shim
+  (GCC 12's `__bf16` has no arithmetic), so its part needs GCC >= 13.
+
+*The analysis and the verified CUDA prototype below are kept for B4b.*
 - **B4a, std backend.** Mark these `constexpr`:
   - the `Kokkos_STD_Half_Conversion.hpp:18-60` conversions;
   - the wrapper ctors (`:282-368`), comparisons (`:740-860`) and arithmetic, under
@@ -2005,10 +2027,11 @@ float what C++23 does for `std::complex<std::float16_t>`?
   `ch3acc` inputs, for the functions (expected: the same up to the last bit, since both
   compute in float).
 
-**CH4. Interop with `std::complex<std::float16_t>` on C++23 host builds (D2). — FUTURE WORK (decided 2026-11-22).**
-*Not implemented: it needs GCC ≥ 13 in C++23 mode (`KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT`),
-which is not available on this system (see B4a). Pick it up together with B4a on a
-GCC ≥ 13 CI job.* Under
+**CH4. Interop with `std::complex<std::float16_t>` on C++23 host builds (D2). — FUTURE WORK (decided 2026-11-22; reason revised 2026-11-24).**
+*Not implemented. Kokkos's minimum is C++20, and `std::float16_t` exists only from
+C++23 on, and only where the compiler provides it (GCC >= 13; not clang/libc++ or
+MSVC). So the constructor would exist in some builds only; pick it up once C++23 is
+Kokkos's minimum standard.* Under
 `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT`:
 
 ```cpp
@@ -2039,10 +2062,23 @@ Trade-offs:
   `complex(const std::complex<RealType>&)`; the template replaces that one.
 - Prefer it to the half-only version if the D4 trait is in place.
 
-**CH5. `constexpr complex<half_t>` (needs B4a, and B4b for GPU backends). — FUTURE WORK, with B4.** Enable
+**CH5. `constexpr complex<half_t>` (needs B4a, and B4b for GPU backends). — std part IMPLEMENTED (2026-11-24); GPU part FUTURE WORK, with B4b.** Enable
 the `static_assert(... <half_t>())` lines in `TestComplex.hpp` under
 `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` (and for GPU backends once B4b exists). Keep the
 runtime twins elsewhere.
+*Status (2026-11-24):* `test_half_complex_in_constant_expression<T>()` in
+`TestComplex.hpp`, `static_assert`ed for `half_t` and `bhalf_t` under
+`KOKKOS_IMPL_HALF_IS_CONSTEXPR`: the existing constant-expression checks
+(construction, assignment, comparison, `norm`, `conj`, `+ - * /` with complex and real
+operands), the conversions to and from `complex<float>`/`complex<double>` (CH2), and
+`test_half_division_in_constant_expression<T>()`: the division check with tolerances
+for half (the exact Smith branches, `big/big` at `finite_max`, and the scaled divisor
+at `norm_min`; the float/double version's range checks are tighter than half precision,
+and `finite_max_v<T> / 2` does not compile for a `BitComparisonWrapper`). No library
+change was needed: `Kokkos::complex` was already `constexpr`, and with B4a its half
+arithmetic (in float, CH3) and the constants `complex_infinity<T>()` etc. are constant
+expressions. The run-time twins (`complex_constexpr_checks_at_runtime`) stay for every
+backend. Compile-checked with the GCC 12 shim (B4a); to verify on Aurora.
 
 **CH6 (optional, performance; from §3b). Paired-half arithmetic on CUDA.** libcu++ stores
 `complex<__half>` as a `__half2` (`alignas(4)`) and uses `__hadd2`, `__hsub2` and
@@ -2635,9 +2671,9 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~Direct-initialize the 6 test lines that trigger the `__bfloat16` false positive~~ | done: `664a10b78`, verified on Aurora (job 9117159: 0 warnings in both builds, all tests pass) | GCC ≥ 13 on Aurora |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
-| B4a: `constexpr` half, std backend | future work | GCC ≥ 13 |
-| CH4: converting constructor from `std::complex<std::float16_t>` (D11) | future work | GCC ≥ 13 |
-| CH5: `constexpr complex<half_t>`, std part | future work (after B4a) | GCC ≥ 13 |
+| B4a: `constexpr` half, std backend | implemented 2026-11-24; compile-checked with a GCC 12 shim (half only); to verify with `run_std_half_fp16.sh`, whose builds compile the `static_assert`s | GCC ≥ 13 (Aurora, Grace) |
+| CH4: converting constructor from `std::complex<std::float16_t>` (D11) | **future work** (2026-11-24): `std::float16_t` needs C++23, Kokkos's minimum is C++20; pick up once C++23 is the minimum | GCC ≥ 13 |
+| CH5: `constexpr complex<half_t>`, std part | implemented 2026-11-24 (tests only); compile-checked with the shim; to verify with `run_std_half_fp16.sh` | GCC ≥ 13 (Aurora, Grace) |
 | B4b-HIP (and CH5 on HIP) | future work, needs a workaround | AMD GPU |
 | B4b-SYCL (and CH5 on SYCL) | future work | Intel GPU (compile-time checks also here) |
 | Locale branch of `half_io` (a decimal comma through the stream's locale) | **future work** (decided 2026-11-23, not a priority); never run: no machine has `de_DE`/`fr_FR` UTF-8 locales | any machine with those locales, or a user-built one (`localedef`, `LOCPATH`) |
