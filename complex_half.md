@@ -1993,6 +1993,14 @@ float what C++23 does for `std::complex<std::float16_t>`?
   16, and `269²` overflows), its `/` is float under both, and Kokkos is the same under
   both. **The conclusion above holds, now measured:** CH3 matches libstdc++ everywhere
   except `*` on FP16-native targets, where Kokkos is more accurate; both conform.
+- **Qualifier: optimized builds contract (job 9120562, 2026-11-24, §8.2 "Release
+  run").** The measurements above are Debug (`-O0`). At `-O3`, on a CPU with half FMA,
+  GCC fuses `a*b - c` into one half FMA (one rounding), in strict `-std=c++23` as well
+  as `-std=gnu++23`. Then libstdc++'s `(269,111.5)²` is `(59936, 60000)`, like Kokkos's,
+  because the product no longer overflows on its own. So libstdc++'s `*` overflows under
+  method 16 only without contraction (Debug, or `-ffp-contract=off`); with it, its
+  result depends on the inputs and on the optimizer. Kokkos's complex results are the
+  same in Debug and Release: CH3 computes in float.
 - **Not done (optional):** compare `std::complex<std::float16_t>` with Kokkos over the
   `ch3acc` inputs, for the functions (expected: the same up to the last bit, since both
   compute in float).
@@ -2352,6 +2360,36 @@ share no build directories).*
   suite on the std half backend, Serial and OpenMP, in the GNU dialect and with native
   half arithmetic.**
 
+*Release run (PBS job 9120562, 2026-11-24, commit `35bac0593`, `BUILD_TYPE=Release`,
+`-O3`, `capacity` queue): all pass.* Aurora, GCC 14.2, the four builds in
+`build_std_half_<config>_release`: 0 warnings, 25 / 15 / 14 tests pass in each,
+including `complex_half_compute_in_float` and `complex_multiplication`. The probe values
+of the builds without FMA (`default`, `gnu`) equal the Debug runs; the native builds
+(`native`, `gnu-native`) differ:
+
+| probe (`native`, `gnu-native`) | Debug, `-O0` (job 9117216) | Release, `-O3` (job 9120562) |
+|---|---|---|
+| `std::float16_t` `256*256-65000` | inf | **544** |
+| `half_t` `256*256-65000` | inf | **544** |
+| `std::complex<std::float16_t>` `(269,111.5)²` | (inf, 60000) | **(59936, 60000)** |
+| `Kokkos::complex<half_t>` `(269,111.5)²` | (59936, 60000) | (59936, 60000) |
+| `(60000,60000)/(1,1)`, both | (60000, 0) | (60000, 0) |
+
+- **Cause: GCC's floating-point contraction** (its default `-ffp-contract=fast`, in
+  strict `-std=c++23` too, which disproves the "probably off for strict C++" guess). The
+  job's binaries could not be disassembled here (binutils 2.30 and LLVM 13 predate
+  AVX512-FP16), so it was reproduced with GCC 12, `-O3 -march=sapphirerapids`: a plain
+  `_Float16` `a*a - c`, the same split over two statements, and a wrapper whose `*` and
+  `-` each return a half (as `half_t`'s) all compile to one `vfmsub132sh`, with
+  `-std=c++20` and `-std=gnu++20`; with `-ffp-contract=off`, `vmulsh` + `vsubsh`.
+- **So `half_t` is not rounded per operation in optimized code on FMA hardware:** GCC
+  fuses across the inlined wrapper operators, as it does for `float` and `double`. Not
+  a Kokkos bug, but half results then depend on the optimization level; code that needs
+  per-operation rounding builds with `-ffp-contract=off`. The probe's label for
+  `half_t` said "rounded per operation: inf"; now "inf unless contracted".
+- **Kokkos's complex results do not change** (CH3 computes in float, and the bit-exact
+  tests pass). D5 gets a qualifier (CH3 notes).
+
 *Run on Aurora (PBS job 9116902, 2026-11-22): all tests pass.* Xeon Max 9470C
 (`avx512_fp16`), GCC 14.2.0, commit `b5d91eb67`, Debug, Serial:
 
@@ -2611,7 +2649,8 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | Report the libstdc++ extraction deviation (sentry failure assigns an uninitialized float; GCC 14, 15, master) to GCC | **future work** (decided 2026-11-23), external | GCC Bugzilla |
 | ~~`ENABLE_OPENMP=ON` and `FULL=ON` (complete test executables)~~ | done 2026-11-23: job 9117446 (`default` and `gnu-native`, Serial + OpenMP): every core test executable builds with 0 warnings and passes, including `Kokkos_CoreUnitTest_OpenMP` (333) and `OpenMPInterOp` (§8.2) | Aurora, `capacity` queue |
 | GCC 13 (only 14.2 and 15.2 tested) | **future work** (decided 2026-11-23): no machine with GCC 13 is available | a machine with GCC 13 |
-| **Optimized builds** (`BUILD_TYPE=Release`, `-O3`): every C++23 run so far was Debug (`-O0`). With optimization GCC contracts into FMAs where the CPU has them (its manual gives `-ffp-contract=off` as the default only for ISO C, so C++ probably contracts in both dialects; on Aurora only the native builds have FMA), seen on Grace at `-O2` (`a * a - c` → half `fmadd`, §8.2). It may change complex multiplication and the bit-exact expectations of `complex_half_compute_in_float` and `complex_multiplication` | open (added 2026-11-23); `run_std_half_fp16.sh` builds other types in their own directories (`…_release`) | Aurora (`BUILD_TYPE=Release`), then Grace |
+| ~~**Optimized builds** (`BUILD_TYPE=Release`, `-O3`) on Aurora~~ | done 2026-11-24, job 9120562: all pass, 0 warnings; the native builds contract half expressions into FMAs (strict and GNU dialect), which changes `std::float16_t`/`half_t` probe values but not Kokkos's complex results (§8.2) | Aurora |
+| Optional: optimized builds on Grace (`qsub -l walltime=2:00:00 -v BUILD_TYPE=Release run_std_half_fp16_grace.sh`); expected the same picture (half `fmadd`, seen at `-O2` in `aarch64_tests.md` step 3) | optional | Grace |
 | Optional: complex functions vs `std::complex<std::float16_t>` over the `ch3acc` inputs (expected equal up to the last bit) | measurement (proposed) | GCC ≥ 13, both evaluation methods |
 | A8 (D11), half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and a build with `-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF` | after A8 | GCC ≥ 13 |
 | Pre-Ampere bf16 double rounding at run time (B4 notes) | known gap, unfixed | none of the available machines: needs an NVIDIA GPU older than sm_80 |

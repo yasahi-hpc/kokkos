@@ -190,14 +190,14 @@ int main() {
   // 65536 - 64992 = 544 (65000 is not representable in half; it rounds to 64992).
   const F16 a = static_cast<F16>(v256), c = static_cast<F16>(v65000);
   const F16 r = a * a - c;
-  std::printf("PROBE std_float16_t   256*256-65000        = %g   (float: 544, half: inf)\n", d(r));
+  std::printf("PROBE std_float16_t   256*256-65000        = %g   (float or FMA: 544, half: inf)\n", d(r));
   const H ha(v256), hc(v65000);
   const H hr = ha * ha - hc;
-  std::printf("PROBE kokkos_half_t   256*256-65000        = %g   (rounded per operation: inf)\n", d(hr));
+  std::printf("PROBE kokkos_half_t   256*256-65000        = %g   (inf unless contracted)\n", d(hr));
   // complex: re = 269^2 - 111.5^2 = 59936.75, with 269^2 = 72361 > 65504.
   const std::complex<F16> z(static_cast<F16>(v269), static_cast<F16>(v111));
   const std::complex<F16> zz = z * z;
-  std::printf("PROBE std_complex     (269,111.5)^2        = (%g, %g)   (float: (59936, 60000))\n",
+  std::printf("PROBE std_complex     (269,111.5)^2        = (%g, %g)   (float or FMA: (59936, 60000), half: (inf, 60000))\n",
               d(zz.real()), d(zz.imag()));
   const Kokkos::complex<H> k{H{v269}, H{v111}};  // braces: H(v269) would declare a parameter
   const Kokkos::complex<H> kk = k * k;

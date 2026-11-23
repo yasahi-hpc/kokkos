@@ -1,6 +1,6 @@
 # C++23 (std half backend): open and future tasks
 
-Status on 2026-11-23 of the tasks that need GCC ≥ 13 in C++23 mode, where `half_t` and
+Status on 2026-11-24 of the tasks that need GCC ≥ 13 in C++23 mode, where `half_t` and
 `bhalf_t` wrap `std::float16_t` and `std::bfloat16_t`. The full record is in
 `complex_half.md` (§8.2 for the runs, §8.5 for the task table); this file is the summary.
 
@@ -17,65 +17,45 @@ All on the std half backend, all with 0 warnings and every test passing:
 | GNU dialect `-std=gnu++23`, Kokkos's default for GCC | Aurora (9117216), Grace (4264666) |
 | Traits vs `std::numeric_limits`; stream I/O vs libstdc++ | Aurora (9117303) |
 | Complete core test suite, Serial + OpenMP (`FULL=ON`) | Aurora (9117446) |
+| Optimized builds (`BUILD_TYPE=Release`, `-O3`), four builds | Aurora (9120562) |
 
-Every one of these runs was a **Debug** build (`-O0`).
+All of these are Debug builds (`-O0`) except the last.
+
+**What the optimized builds showed.** On a CPU with half FMA (Sapphire Rapids, the
+`native` and `gnu-native` builds) GCC contracts `a*b - c` into one half FMA, rounded
+once, in strict `-std=c++23` as well as `-std=gnu++23`. Probe values change:
+
+| probe (`native`, `gnu-native`) | Debug | Release |
+|---|---|---|
+| `std::float16_t` and `half_t` `256*256-65000` | inf | 544 |
+| `std::complex<std::float16_t>` `(269,111.5)²` | (inf, 60000) | (59936, 60000) |
+| `Kokkos::complex<half_t>` `(269,111.5)²` | (59936, 60000) | (59936, 60000) |
+
+- `half_t` arithmetic is fused across its inlined operators like `float` and `double`
+  arithmetic; so in optimized code it is not rounded after each operation. That is
+  GCC's default (`-ffp-contract=fast`), not a Kokkos bug; `-ffp-contract=off` restores
+  per-operation rounding.
+- libstdc++'s complex `*` overflows under native half only without contraction.
+- Kokkos's complex results and all tests are unchanged.
+
+Details: `complex_half.md` §8.2 ("Release run") and the D5 qualifier in the CH3 notes.
 
 ## Open
 
-### 1. Optimized builds (Release, `-O3`)
+### 1. Optional: optimized builds on Grace
 
-**Why.** With optimization GCC contracts `a * b + c` into a fused multiply-add (one
-rounding instead of two), where the CPU has FMA and contraction is allowed. GCC's manual
-gives `-ffp-contract=off` as the default only for C in a strict ISO mode, and `fast`
-otherwise, so C++ probably contracts in both dialects (not checked; the run will show).
-On Aurora only the native builds have FMA:
-
-| build | dialect | FMA available | contraction possible |
-|---|---|---|---|
-| `default` | `-std=c++23` | no (x86-64 baseline) | no |
-| **`native`** | `-std=c++23` | yes (Sapphire Rapids) | **yes** |
-| `gnu` | `-std=gnu++23` | no | no |
-| **`gnu-native`** | `-std=gnu++23` | yes | **yes** |
-
-Grace already showed the effect: at `-O2`, the stand-alone check of `aarch64_tests.md`
-fused `a * a - c` into a half `fmadd` and printed 544 instead of inf. In Kokkos it could
-change the result of complex multiplication, and break tests that expect bit-exact
-results: `complex_half_compute_in_float` (half path vs float path) and
-`complex_multiplication` (vs the textbook formula). Either outcome is worth knowing.
-
-**Run on Aurora**, from the Kokkos checkout:
+The Aurora result should carry over: Grace's native builds have half FMA, and the
+stand-alone check of `aarch64_tests.md` (step 3) already showed a half `fmadd` at
+`-O2`. On aarch64 even the builds without `ARMV9_GRACE` have float FMA (it is part of
+base aarch64), so `default` and `gnu` may contract float arithmetic too.
 
 ```bash
-qsub -q capacity -l walltime=2:00:00 -v BUILD_TYPE=Release run_std_half_fp16.sh
+qsub -l walltime=2:00:00 -v BUILD_TYPE=Release run_std_half_fp16_grace.sh
 ```
 
-- **What it does:** builds `build_std_half_<config>_release` for the four configs,
-  so the Debug builds are kept. `Kokkos_ENABLE_DEBUG` is OFF for this build type.
-- **Queue:** `capacity`, because four optimized builds may not fit in the debug queue's
-  hour.
-- **Optional, longer:** add the complete test executables and OpenMP:
-
-  ```bash
-  qsub -q capacity -l walltime=3:00:00 \
-       -v 'BUILD_TYPE=Release,ENABLE_OPENMP=ON,FULL=ON,CONFIGS=default gnu-native' \
-       run_std_half_fp16.sh
-  ```
-
-**What to look for** in `std_half_fp16_logs.<job>/job.out`:
-
-| | expected |
-|---|---|
-| `optimization:` line of each build | `-O3` |
-| probe values in `default`, `gnu` | as in the Debug runs (job 9117216) |
-| probe values in `native`, `gnu-native` | may differ: `std_float16_t 256*256-65000` can print 544 instead of inf, if GCC fuses it |
-| `kokkos_complex (269,111.5)^2` | (59936, 60000) everywhere; a different value means contraction changed Kokkos's result |
-| tests | all pass. A failure in `complex_half_compute_in_float` or `complex_multiplication` in a native build would point to contraction |
-
-Then on Grace the same with `qsub -v BUILD_TYPE=Release run_std_half_fp16_grace.sh`.
-There every build can contract float arithmetic (FMA is part of base aarch64), and the
-native builds half arithmetic too: the stand-alone check already showed a half
-`fmadd`. Grace's walltime limit for the 1-hour header may need raising
-(`qsub -l walltime=2:00:00 …`).
+Expected: all tests pass; in `native` and `gnu-native` the probe values of the Aurora
+Release run (`256*256-65000` = 544, libstdc++ `(269,111.5)²` = (59936, 60000)); Kokkos
+`(269,111.5)²` = (59936, 60000) in all four.
 
 ### 2. Optional: complex functions vs libstdc++
 
