@@ -18,8 +18,9 @@ All on the std half backend, all with 0 warnings and every test passing:
 | Traits vs `std::numeric_limits`; stream I/O vs libstdc++ | Aurora (9117303) |
 | Complete core test suite, Serial + OpenMP (`FULL=ON`) | Aurora (9117446) |
 | Optimized builds (`BUILD_TYPE=Release`, `-O3`), four builds | Aurora (9120562) |
+| B4a, CH5: `constexpr half_t`/`bhalf_t` and `constexpr complex<half_t>`/`complex<bhalf_t>`: compile-time checks evaluated for both types in four builds; CUDA unchanged | Aurora (9121273); A100 (10415251, 10415253) |
 
-All of these are Debug builds (`-O0`) except the last.
+All of these are Debug builds (`-O0`) except the Release row.
 
 **What the optimized builds showed.** On a CPU with half FMA (Sapphire Rapids, the
 `native` and `gnu-native` builds) GCC contracts `a*b - c` into one half FMA, rounded
@@ -67,32 +68,6 @@ since both compute in float. Multiplication and division are already settled.
 **Status.** The program is not written: `ch3acc` is a CUDA program on the A100 machine.
 A host-only version with a `std::complex<std::float16_t>` reference column is needed
 first. Low priority.
-
-### 3. B4a and CH5: `constexpr` half and `constexpr complex<half_t>`
-
-**What.** Implemented 2026-11-24 (`complex_half.md`, B4 and CH5 notes):
-- **B4a:** on the std backend every function of `half_t`/`bhalf_t` is `constexpr`
-  (conversions, operators, comparisons, numeric-trait constants, the cast
-  functions). The feature macro `KOKKOS_IMPL_HALF_IS_CONSTEXPR` marks it. Nothing
-  changes on CUDA, HIP and SYCL.
-- **CH5 (std part):** the constant-expression checks of `Kokkos::complex` run for
-  `half_t` and `bhalf_t` too, plus a half version of the division check.
-
-**Checked here** only with a GCC 12 shim, for `half_t`: the `static_assert`s compile and
-the complex tests pass. `bhalf_t` needs GCC >= 13.
-
-**Run on Aurora** (and on Grace with `run_std_half_fp16_grace.sh`):
-
-```bash
-qsub run_std_half_fp16.sh
-```
-
-The tests are compile-time: `half_constexpr_checks` (`TestHalfConversion.hpp`, in
-`Kokkos_CoreUnitTest_Default`) and `test_half_complex_in_constant_expression`
-(`TestComplex.hpp`, in `Kokkos_CoreUnitTest_Serial_SmokeTest`). If a build of those
-targets succeeds, they pass. Expected: all builds `ok (0 warnings)`, all tests pass as
-before (25 / 15 / 14). A failure would be a `static assertion failed` or "is not a
-constant expression" error in the build log of one of those targets.
 
 ## Future work
 

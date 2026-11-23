@@ -1590,7 +1590,7 @@ results and return types statically, the absence of `conj`/`proj(half_t)` and of
 mixed `pow` on the host and in a kernel.
 
 **B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — B4a IMPLEMENTED (2026-11-24); B4b, B4c FUTURE WORK.**
-*B4a status (2026-11-24): implemented, compile-checked here, to verify on Aurora.*
+*B4a status (2026-11-24): implemented (`545a6aa5a`), verified on Aurora (job 9121273, see below).*
 - **Code:** `Kokkos_Half_FloatingPointWrapper.hpp` defines `KOKKOS_IMPL_HALF_CONSTEXPR`
   (`constexpr` when `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` or `..._BHALF_...` is
   defined, else empty) and the feature macro `KOKKOS_IMPL_HALF_IS_CONSTEXPR`. Every
@@ -1613,6 +1613,14 @@ mixed `pow` on the host and in a kernel.
   B4a and CH5 `static_assert`s compile (a planted false assertion fails, so they are
   evaluated), and `*complex*:*atomic*` passes (25). `bhalf_t` is `float` in the shim
   (GCC 12's `__bf16` has no arithmetic), so its part needs GCC >= 13.
+- **Verified on Aurora (PBS job 9121273, 2026-11-24, `545a6aa5a`, GCC 14.2):** all four
+  builds of `run_std_half_fp16.sh` (`default`, `native`, `gnu`, `gnu-native`; Debug,
+  Serial) with 0 warnings, 25 / 15 / 14 tests pass. `half_t` and `bhalf_t` both wrap the
+  std types there, and the builds recompiled `TestDefaultDeviceType.cpp` (B4a checks)
+  and `TestSerial_Complex.cpp` (CH5 checks): so the `static_assert`s were evaluated and
+  hold for both types, `bhalf_t` for the first time. CUDA unchanged (macro empty): A100
+  jobs 10415251 (`*half*`: 12 pass, the 2 `*_io_vs_std` skip as without the std
+  backend) and 10415253 (`*complex*:*atomic*`: 25/25 on Serial and Cuda).
 
 *The analysis and the verified CUDA prototype below are kept for B4b.*
 - **B4a, std backend.** Mark these `constexpr`:
@@ -2078,7 +2086,8 @@ and `finite_max_v<T> / 2` does not compile for a `BitComparisonWrapper`). No lib
 change was needed: `Kokkos::complex` was already `constexpr`, and with B4a its half
 arithmetic (in float, CH3) and the constants `complex_infinity<T>()` etc. are constant
 expressions. The run-time twins (`complex_constexpr_checks_at_runtime`) stay for every
-backend. Compile-checked with the GCC 12 shim (B4a); to verify on Aurora.
+backend. Compile-checked with the GCC 12 shim (B4a); verified on Aurora for `half_t` and
+`bhalf_t` (job 9121273, with B4a).
 
 **CH6 (optional, performance; from §3b). Paired-half arithmetic on CUDA.** libcu++ stores
 `complex<__half>` as a `__half2` (`alignas(4)`) and uses `__hadd2`, `__hsub2` and
@@ -2671,9 +2680,9 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~Direct-initialize the 6 test lines that trigger the `__bfloat16` false positive~~ | done: `664a10b78`, verified on Aurora (job 9117159: 0 warnings in both builds, all tests pass) | GCC ≥ 13 on Aurora |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
-| B4a: `constexpr` half, std backend | implemented 2026-11-24; compile-checked with a GCC 12 shim (half only); to verify with `run_std_half_fp16.sh`, whose builds compile the `static_assert`s | GCC ≥ 13 (Aurora, Grace) |
+| ~~B4a: `constexpr` half, std backend~~ | done 2026-11-24 (`545a6aa5a`), verified on Aurora (job 9121273, four builds, `half_t` and `bhalf_t`); CUDA unchanged (A100 jobs 10415251, 10415253) | GCC ≥ 13 |
 | CH4: converting constructor from `std::complex<std::float16_t>` (D11) | **future work** (2026-11-24): `std::float16_t` needs C++23, Kokkos's minimum is C++20; pick up once C++23 is the minimum | GCC ≥ 13 |
-| CH5: `constexpr complex<half_t>`, std part | implemented 2026-11-24 (tests only); compile-checked with the shim; to verify with `run_std_half_fp16.sh` | GCC ≥ 13 (Aurora, Grace) |
+| ~~CH5: `constexpr complex<half_t>`, std part~~ | done 2026-11-24 (tests only), verified on Aurora (job 9121273) | GCC ≥ 13 |
 | B4b-HIP (and CH5 on HIP) | future work, needs a workaround | AMD GPU |
 | B4b-SYCL (and CH5 on SYCL) | future work | Intel GPU (compile-time checks also here) |
 | Locale branch of `half_io` (a decimal comma through the stream's locale) | **future work** (decided 2026-11-23, not a priority); never run: no machine has `de_DE`/`fr_FR` UTF-8 locales | any machine with those locales, or a user-built one (`localedef`, `LOCPATH`) |
