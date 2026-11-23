@@ -40,7 +40,11 @@
 #   ARCH         Kokkos_ARCH_<ARCH> of the native build (default: SPR on x86-64,
 #                ARMV9_GRACE on aarch64)
 #   CONFIGS      builds to run         (default: "default native gnu gnu-native")
-#   BUILD_TYPE   CMake build type      (default: Debug)
+#   BUILD_TYPE   CMake build type      (default: Debug). Other types build in their own
+#                directories (build_std_half_<config>[_omp]_<type>, e.g. _release), so
+#                the Debug builds are kept; Kokkos_ENABLE_DEBUG is ON only for Debug.
+#                Release (-O3) is where GCC contracts expressions into FMAs, on CPUs
+#                with FMA (see c++23-tests.md).
 #   JOBS         build parallelism     (default: number of CPUs)
 #   ENABLE_OPENMP  ON: also enable the OpenMP backend; builds and runs
 #                Kokkos_CoreUnitTest_OpenMP_SmokeTest and Kokkos_CoreUnitTest_OpenMP too,
@@ -278,7 +282,7 @@ for cfg in $CONFIGS; do
     gnu-native) ARCH_ARGS=("-DKokkos_ARCH_$ARCH=ON") EXT=ON ;;
     *) die "unknown config '$cfg' in CONFIGS (default, native, gnu, gnu-native)" ;;
   esac
-  B=$BUILD_ROOT/build_std_half_$cfg$([ "$ENABLE_OPENMP" = ON ] && echo _omp)
+  B=$BUILD_ROOT/build_std_half_$cfg$([ "$ENABLE_OPENMP" = ON ] && echo _omp)$([ "$BUILD_TYPE" != Debug ] && echo "_${BUILD_TYPE,,}")
 
   echo "===== [$cfg] Configure ($BUILD_TYPE, ${BACKENDS// / + }, ${ARCH_ARGS[*]:-no Kokkos_ARCH}, CMAKE_CXX_EXTENSIONS=$EXT)"
   cmake -S "$KOKKOS_SRC" -B "$B" \
@@ -289,7 +293,7 @@ for cfg in $CONFIGS; do
     -DKokkos_ENABLE_SERIAL=ON \
     -DKokkos_ENABLE_OPENMP="$ENABLE_OPENMP" \
     -DKokkos_ENABLE_TESTS=ON \
-    -DKokkos_ENABLE_DEBUG=ON \
+    -DKokkos_ENABLE_DEBUG="$([ "$BUILD_TYPE" = Debug ] && echo ON || echo OFF)" \
     "${ARCH_ARGS[@]}" \
     > "$LOG_DIR/${cfg}_configure.log" 2>&1
   rc=$?
@@ -319,7 +323,7 @@ for cfg in $CONFIGS; do
   # The probes, with the tests' own flags (so the arch flags are included).
   echo "===== [$cfg] Half evaluation (with the tests' flags)"
   FLAGS=$(test_flags "$B")
-  echo "  dialect: $(echo "$FLAGS" | grep -oE -- '-std=[a-z+0-9]+' | sort -u | tr '\n' ' ')"
+  echo "  dialect: $(echo "$FLAGS" | grep -oE -- '-std=[a-z+0-9]+' | sort -u | tr '\n' ' ')  optimization: $(echo "$FLAGS" | grep -oE -- '-O[0-3sg]|-ffp-contract=[a-z]+' | tr '\n' ' ')"
   # shellcheck disable=SC2086
   (cd "$B" && echo | "$CXX" $FLAGS -dM -E -x c++ - 2>&1 |
     grep -E '__FLT_EVAL_METHOD(_TS_18661_3)?__ |__AVX512FP16__ |__ARM_FEATURE_FP16_SCALAR_ARITHMETIC |__STDCPP_B?FLOAT16_T__ |__STRICT_ANSI__ ' |
