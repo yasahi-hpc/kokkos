@@ -155,11 +155,20 @@ qsub run_std_half_fp16_grace.sh
 The wrapper handles the assembler itself (added 2026-11-23, after job 4264666): if the
 assembler on `PATH` cannot compile `-mcpu=neoverse-v2`, it makes a temporary directory
 of symlinks to the binutils of the newest gcc-toolset (15, 14, 13) that can, and puts
-it first on `PATH`. The top of the job output shows the choice, e.g.
+it first on `PATH`. The top of the PBS output file (not `job.out`, which starts later)
+shows the choice, e.g.
 `assembler: …/binutils-gcc-toolset-14.XXXXXX/as: GNU assembler version 2.41-3.el9` and
 `assembler: -mcpu=neoverse-v2 ok`. `qsub -v BINUTILS_DIR=<dir>` names a directory
 instead. Job 4264666 predates this and was submitted with
 `qsub -v "PATH=<binutils241 dir>:$PATH"`, which works too.
+
+**Build directories are reused.** The builds go to `$BUILD_ROOT/build_std_half_<config>`
+(default `BUILD_ROOT` = the checkout) and are built incrementally: a second job with
+unchanged sources compiles nothing, so its "0 warnings" says nothing (job 4265289 did
+this). For a clean build, pass an empty directory, e.g.
+`qsub -v 'BUILD_ROOT=/home/i18048/jh220036/develop/complex/grace_fresh_build' …`;
+the logs then go to `$BUILD_ROOT/std_half_fp16_logs.<job id>/`. Check the build logs:
+a real build has `Building CXX object` lines, a reused one only `Built target`.
 
 - **What it runs:** four builds, each Serial, Debug, C++23:
   - `default`: no `Kokkos_ARCH`, strict `-std=c++23`;
@@ -225,7 +234,15 @@ steps 1-3: `/home/i18048/jh220036/develop/complex/aarch64_checks/`.
    | warnings, 5 targets | 0 | 0 |
    | tests | 25 / 15 / 14 pass | 25 / 15 / 14 pass |
 
-   Logs: `std_half_fp16_logs.4264666/` in the checkout.
+   Logs: `std_half_fp16_logs.4264666/` in the checkout. Every build compiled from
+   scratch (157 files each).
+5. **The wrapper's own binutils choice (job 4271100, commit `bfab679c6`, plain `qsub`,
+   `CONFIGS=native`, empty `BUILD_ROOT`):** it chose gcc-toolset-14's binutils 2.41,
+   compiled 157 files with 0 warnings, the probe values equal job 4264666's native
+   column, and 25 / 15 / 14 tests pass. Logs:
+   `/home/i18048/jh220036/develop/complex/grace_fresh_build/std_half_fp16_logs.4271100/`.
+   (Job 4265289, the same without an empty `BUILD_ROOT`, reused job 4264666's build
+   and compiled only the probes.)
 
 ## Troubleshooting
 

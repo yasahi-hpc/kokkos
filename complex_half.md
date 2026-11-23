@@ -2282,8 +2282,13 @@ armv9-a+…"), so the job ran with gcc-toolset-14's binutils 2.41 first on `PATH
 (`qsub -v PATH=…`; only binutils, not that toolset's GCC 14; `aarch64_tests.md`
 Prerequisites). Since then `run_std_half_fp16_grace.sh` does this itself: if the
 assembler cannot compile `-mcpu=neoverse-v2`, it puts a symlink directory to the newest
-gcc-toolset binutils that can first on `PATH` (override: `BINUTILS_DIR`); checked with
-a plain `qsub` (job 4265289, `CONFIGS=native`).
+gcc-toolset binutils that can first on `PATH` (override: `BINUTILS_DIR`). Checked with a
+plain `qsub` of commit `bfab679c6` and an empty build root (job 4271100,
+`CONFIGS=native`, `BUILD_ROOT=…/grace_fresh_build`): it chose gcc-toolset-14's
+binutils 2.41, compiled the 5 targets from scratch (157 files, 0 warnings), the probe
+values equal job 4264666's, and 25 / 15 / 14 tests pass. (The earlier job 4265289 is not
+a check of the fix: it reused job 4264666's `build_std_half_native`, so nothing but the
+probes was compiled.)
 
 | | `default` | `native` | `gnu` | `gnu-native` |
 |---|---|---|---|---|
