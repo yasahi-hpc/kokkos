@@ -19,6 +19,7 @@ All on the std half backend, all with 0 warnings and every test passing:
 | Complete core test suite, Serial + OpenMP (`FULL=ON`) | Aurora (9117446) |
 | Optimized builds (`BUILD_TYPE=Release`, `-O3`), four builds | Aurora (9120562) |
 | B4a, CH5: `constexpr half_t`/`bhalf_t` and `constexpr complex<half_t>`/`complex<bhalf_t>`: compile-time checks evaluated for both types in four builds; CUDA unchanged | Aurora (9121273); A100 (10415251, 10415253) |
+| A8 (D11), half part: the deprecated `std::complex` interop for `half_t`/`bhalf_t` on libstdc++ (deprecated code ON: 27 complex tests), and the Kokkos 6 state (`DEPRECATED_CODE=OFF`: 26), four builds each, 0 warnings | Aurora (9121388, 9121428) |
 
 All of these are Debug builds (`-O0`) except the Release row.
 
@@ -68,30 +69,6 @@ since both compute in float. Multiplication and division are already settled.
 **Status.** The program is not written: `ch3acc` is a CUDA program on the A100 machine.
 A host-only version with a `std::complex<std::float16_t>` reference column is needed
 first. Low priority.
-
-### 3. A8, half part: the deprecated `std::complex` interop on the std backend
-
-**What.** A8 (implemented 2026-11-24) deprecates every interop between
-`Kokkos::complex` and `std::complex` except the converting constructor
-(`complex_half.md`, D11 and A8). Its test `complex_std_interop_deprecated` also runs for
-`half_t`/`bhalf_t`, which on the std backend means `std::complex<half_t>` through
-libstdc++'s generic template. The Kokkos 6 state is a build with
-`-DKokkos_ENABLE_DEPRECATED_CODE_5=OFF`.
-
-**Run on Aurora:**
-
-```bash
-qsub run_std_half_fp16.sh                          # deprecated code ON (default)
-qsub -v DEPRECATED_CODE=OFF run_std_half_fp16.sh   # Kokkos 6 state, build_std_half_*_nodep
-```
-
-The two can run at the same time (separate build directories).
-
-**Expected:** all builds `ok (0 warnings)`, all tests pass. The ON run's
-`*complex*:*atomic*` has 2 more tests than before (27): `complex_std_interop_converting_ctor`
-and `complex_std_interop_deprecated`. The OFF run has 26 (no deprecated test). A
-deprecation warning in an ON build would mean a test still uses deprecated interop
-outside the suppressed blocks.
 
 ## Future work
 
