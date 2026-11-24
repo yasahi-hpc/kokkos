@@ -19,6 +19,7 @@ All on the std half backend, all with 0 warnings and every test passing:
 | Complete core test suite, Serial + OpenMP (`FULL=ON`) | Aurora (9117446) |
 | Optimized builds (`BUILD_TYPE=Release`, `-O3`), four builds | Aurora (9120562) |
 | B4a, CH5: `constexpr half_t`/`bhalf_t` and `constexpr complex<half_t>`/`complex<bhalf_t>`: compile-time checks evaluated for both types in four builds; CUDA unchanged | Aurora (9121273); A100 (10415251, 10415253) |
+| B4c: the half numeric traits as `constexpr half_t`/`bhalf_t`, equal to `std::numeric_limits` bit for bit; and the B4b-CUDA software conversions equal the native `std::float16_t`/`std::bfloat16_t` ones (`*_constexpr_path_matches_runtime`), four builds, 0 warnings | Aurora (9123196) |
 | A8 (D11), half part: the deprecated `std::complex` interop for `half_t`/`bhalf_t` on libstdc++ (deprecated code ON: 27 complex tests), and the Kokkos 6 state (`DEPRECATED_CODE=OFF`: 26), four builds each, 0 warnings | Aurora (9121388, 9121428) |
 
 All of these are Debug builds (`-O0`) except the Release row.
@@ -69,21 +70,6 @@ since both compute in float. Multiplication and division are already settled.
 **Status.** The program is not written: `ch3acc` is a CUDA program on the A100 machine.
 A host-only version with a `std::complex<std::float16_t>` reference column is needed
 first. Low priority.
-
-### 3. B4c on the std backend: the half numeric traits as `constexpr` half values
-
-**What.** B4c (2026-11-24; `complex_half.md`, B4c status) makes the 9 value traits of
-`half_t` and `bhalf_t` (`infinity`, `epsilon`, `finite_max`, ...) `constexpr` half values
-wherever half is `constexpr`, which includes the std backend. Verified on CUDA, and for
-`half_t` with the GCC 12 shim; `bhalf_t` on the std backend needs GCC >= 13.
-
-**Run on Aurora:** `qsub run_std_half_fp16.sh`. The check is compile-time
-(`half_value_traits_are_constexpr_halves`, in `Kokkos_CoreUnitTest_Serial1`), so a
-successful build means it passes. Expected: all builds `ok (0 warnings)`, and
-`*numeric_traits*` 15 (`numeric_traits_half_vs_std_numeric_limits` included, now
-comparing `constexpr` half traits with `std::numeric_limits`), `*complex*:*atomic*` 27,
-`*half*` 16 tests, 16 passing (the two `*_constexpr_path_matches_runtime` tests run on
-the std backend too).
 
 ## Future work
 

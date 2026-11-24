@@ -1743,7 +1743,7 @@ too. And the full-type branches (device pass only) need their own fallback. So:
 - **B4c (optional).** Numeric traits as `constexpr half_t` (H11), once B4b exists. Today's
   `BitComparisonWrapper` return type is public API, so this needs care.
 
-  *B4c status (2026-11-24): implemented where half is `constexpr`; verified on CUDA (A100 jobs 10420748-50); the std backend (Aurora) is to run.*
+  *B4c status (2026-11-24): DONE (`c0e6e93ee`); verified on CUDA (A100 jobs 10420748-50) and on the std backend (Aurora job 9123196).*
   - **The care, reconciled with the source:** `BitComparisonWrapper` lives in
     `Kokkos::Experimental::Impl`. It is reachable as `half_t::bit_comparison_type` and
     is the type of `infinity_v<half_t>` and the other value traits. Nothing in Kokkos
@@ -1785,7 +1785,15 @@ too. And the full-type branches (device pass only) need their own fallback. So:
       `numeric_limits<_Float16>`: a shim artifact; that test passes with GCC 14
       (Aurora). 27 complex and 9 conversion tests pass.
     - Host (`half_t` = float): unchanged, all pass, 0 warnings.
-    - To run: `run_std_half_fp16.sh` on Aurora (`bhalf_t` on the std backend).
+    - std backend, Aurora job 9123196 (GCC 14.2, `c0e6e93ee`, the four builds of
+      `run_std_half_fp16.sh`): 0 warnings; `*complex*:*atomic*` 27, `*numeric_traits*`
+      15, `*half*` 16 pass in each. `half_t` and `bhalf_t` wrap the std types and
+      `TestSerial_NumericTraits.cpp` was recompiled, so the B4c checks hold for both;
+      `numeric_traits_half_vs_std_numeric_limits` passes, so the `constexpr` traits
+      equal `std::numeric_limits` bit for bit. The same run is the first of
+      `half_`/`bhalf_constexpr_path_matches_runtime` on the std backend: the software
+      conversions (B4b-CUDA) agree with GCC's native `std::float16_t`/`std::bfloat16_t`
+      conversions in all four builds.
 
 *B4 status (2026-11-22): B4a blocked here (no GCC ≥ 13). B4b prototype verified on
 host and A100 (jobs 10396298, 10396345, 10396374). `constexpr` was checked per backend
