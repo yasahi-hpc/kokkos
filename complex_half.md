@@ -2837,6 +2837,7 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~Remaining 7 `__bfloat16` warnings at test lines (`-march=sapphirerapids`)~~ | done 2026-11-22, job 9116988: GCC false positive on struct-to-struct bit copies; harmless, no change (§8.2) | GCC ≥ 13 on Aurora |
 | ~~H18: `cast_to_half(half_t)`/`cast_to_bhalf(bhalf_t)` missing on the std backend~~ | done: fixed `1220b11de`, verified on Aurora (job 9117024); CUDA run: job 10404035 | GCC ≥ 13 |
 | ~~Direct-initialize the 6 test lines that trigger the `__bfloat16` false positive~~ | done: `664a10b78`, verified on Aurora (job 9117159: 0 warnings in both builds, all tests pass) | GCC ≥ 13 on Aurora |
+| ~~Complete CUDA core test suite (A100)~~ | done 2026-11-24 at `82a06f7a8`: every core test executable passes (jobs 10421072, 10421610), except `cuda_graph.sized_functor_launch`, which segfaulted in this build before the branch too (`cuda-tests.md`) | A100 |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
 | Validation of the committed work with SYCL half/bhalf, host and device | verification | Intel GPU with FP64 (§8.4) |
 | ~~B4a: `constexpr` half, std backend~~ | done 2026-11-24 (`545a6aa5a`), verified on Aurora (job 9121273, four builds, `half_t` and `bhalf_t`); CUDA unchanged (A100 jobs 10415251, 10415253) | GCC ≥ 13 |

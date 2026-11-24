@@ -24,6 +24,7 @@ All verified on the A100, host (Serial) and device (Cuda):
 | B4a, CH5 | CUDA unchanged by the std-backend `constexpr` (macro empty) | 10415251, 10415253 |
 | A8 | `std::complex` interop deprecated except the converting constructor; 27/27 complex tests on Serial and Cuda, including the deprecated-interop test for `half_t`/`bhalf_t`; 0 nvcc warnings | 10415439 |
 | B4b-CUDA, CH5 on CUDA | `constexpr half_t`/`bhalf_t` and `constexpr complex<half_t>` on CUDA: software conversions in constant evaluation, bit-identical to the hardware on every pattern, midpoint and 64-bit integer (host and device); B4a/CH5 `static_assert`s hold in both nvcc passes; `*half*` 14 pass, complex 27/27, numeric traits 14 | 10415931, 10415932, 10415933 |
+| Complete CUDA core test suite | all 10 core test executables of `build_gpu`, unfiltered, at `82a06f7a8` (`sub_full_A100.sh`): `Cuda1` 224, `Cuda2` 129, `Cuda3` 62, `Cuda_ViewSupport` 37, `Serial_SmokeTest` 128, `Serial1` 217, `Serial2` 126, `Serial_ViewSupport` 37, `Default` 76 pass; `Cuda_SmokeTest` without `cuda_graph.sized_functor_launch`: 126 pass (`sub_cudasmoke_A100.sh`). Skips are Kokkos's own. `sized_functor_launch` segfaults, as it did in this build before the branch (below) | 10421072, 10421610 |
 | B4c | the half numeric traits are `constexpr half_t`/`bhalf_t` on CUDA (bit patterns on HIP/SYCL): compile-time checks hold in both nvcc passes; `*half*` 14, complex 27/27, numeric traits 14 on Serial and Cuda | 10420748, 10420749, 10420750 |
 | B4b-CUDA prototype | software `constexpr` conversions for `__half`/`__nv_bfloat16`: 0 mismatches over all floats, all bit patterns and all 65536² arithmetic pairs (non-NaN) | 10396298, 10396345, 10396374 |
 | CH6 benchmark | paired `__half2` arithmetic: no gain. It halves the instruction count (nvcc does not pair the scalar operations), but the measured kernels are bound by memory bandwidth or latency; results bit-identical | 10397058 |
@@ -33,29 +34,9 @@ Every one of these runs was the **Debug** build, and the test runs used **filter
 
 ## Open
 
-Both can run on the A100.
+It can run on the A100.
 
-### 1. Complete CUDA core test suite
-
-**Why.** The branch changed `Kokkos_Complex.hpp` and the half headers, which much of
-Kokkos includes. The A100 runs checked only the complex, half and numeric-trait
-tests. A complete run covers everything else that uses complex or half values:
-reductions, atomics, views, math functions and so on. On the std backend the
-complete suite already passes (Aurora job 9117446).
-
-**How.** Build and run every core test executable of `build_gpu`:
-`Kokkos_CoreUnitTest_Cuda_SmokeTest`, `Cuda1`, `Cuda2`, `Cuda3`, `Cuda_ViewSupport`,
-`Serial_SmokeTest`, `Serial1`, `Serial2`, `Serial_ViewSupport` and `Default`, without a
-filter. Compile on the login node
-(`make -j8 -f <target>/build.make <objects>`), then link and run in a GPU job, as the
-existing `sub_*_A100.sh` scripts do. The job script doesn't exist yet.
-*Caution:* calling `build.make` directly does not notice changed headers, so delete
-the objects first (or run `cmake --build` in the job).
-
-**Expected:** all pass, apart from tests Kokkos itself skips. Compare any failure
-with a run on the branch's base commit `a360acf37` before suspecting the branch.
-
-### 2. Optimized CUDA build (Release)
+### 1. Optimized CUDA build (Release)
 
 **Why.** `build_gpu` is a Debug build. On the device, nvcc contracts `a*b + c` into FMAs
 by default (`--fmad=true`), also in Debug builds, which the device tests have
@@ -71,6 +52,16 @@ needs many files: check the group's file quota on `/work` first, which is nearly
 
 **Expected:** all pass. A bit-exact test that fails only in Release would point to
 host-side contraction.
+
+### Not from this work: `cuda_graph.sized_functor_launch` segfaults
+
+`Kokkos_CoreUnitTest_Cuda_SmokeTest` segfaults (exit 139) in
+`cuda_graph.sized_functor_launch`, which launches an `int` functor padded to 100,
+6000 and 100,000 bytes through a CUDA Graph. It did so in this `build_gpu` before the
+branch: ctest recorded `***Exception: SegFault` on 2026-10-22, 10-26 and 10-27
+(`sub_tests_A100.sh.*.out`). The first of those is before the base commit `a360acf37`
+(2026-10-23). The branch changes nothing in the graph code. Not investigated: CUDA
+12.6, Debug, A100; possibly the launch path for large functors.
 
 ## Future work
 
@@ -90,6 +81,8 @@ Not CUDA, so listed elsewhere: HIP and SYCL validation, and B4b on HIP and SYCL
 | `sub_complex_A100.sh` | link and run `*complex*:*atomic*` on Serial and Cuda |
 | `sub_half_A100.sh` | link and run `Kokkos_CoreUnitTest_Default` `*half*` |
 | `sub_numtraits_A100.sh` | `*numeric_traits*` on Serial1 and Cuda1 |
+| `sub_full_A100.sh` | every core test executable, unfiltered (objects compiled on the login node first, from the `/work` path) |
+| `sub_cudasmoke_A100.sh` | `Cuda_SmokeTest` without the pre-existing `sized_functor_launch` segfault |
 | `tmp/claude_builds/complex_a6/` | the CH3 accuracy/benchmark, CH6 benchmark, B4b prototype and probe sources, with their `sub_*_A100.sh` jobs |
 
 Objects are compiled on the login node, with modules `gcc/12.2.0 cuda/12.6 cmake/3.24.0`.
