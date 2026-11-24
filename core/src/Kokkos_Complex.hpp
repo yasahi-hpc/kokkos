@@ -39,12 +39,13 @@ using complex_compute_t = std::conditional_t<is_half_type_v<T>, float, T>;
 
 // The constants the algorithms below use, as values of T. For the standard
 // floating-point types they are the constexpr numeric traits and <numbers>
-// constants. For half_t and bhalf_t the numeric traits are
-// BitComparisonWrapper (converted to T at run time) and <numbers> has no
-// constants, so they are converted from double (exactly rounded). On the std
-// backend (B4a) and on CUDA (B4b-CUDA) these conversions are constexpr; on HIP
-// and SYCL they run at run time (future work). The algorithms therefore hold
-// them in const, not constexpr, locals.
+// constants. For half_t and bhalf_t the numeric traits are constexpr half
+// values on the std backend and on CUDA (B4c), bit patterns
+// (BitComparisonWrapper) on HIP and SYCL, and <numbers> has no constants, so
+// they are converted from double (exactly rounded). On the std backend (B4a)
+// and on CUDA (B4b-CUDA) these conversions are constexpr; on HIP and SYCL they
+// run at run time (future work). The algorithms therefore hold them in const,
+// not constexpr, locals.
 #define KOKKOS_IMPL_COMPLEX_TRAIT_CONSTANT(NAME, TRAIT)          \
   template <class T>                                             \
   KOKKOS_INLINE_FUNCTION constexpr T complex_##NAME() noexcept { \

@@ -6,6 +6,24 @@
 
 #include <Kokkos_NumericTraits.hpp>
 
+// The distinguished values of half_t and bhalf_t (infinity, finite_min/max,
+// epsilon, round_error, norm_min, denorm_min, quiet/signaling NaN), given as
+// bit patterns (B4c). Where half values are constexpr (the std backend, B4a;
+// CUDA, B4b-CUDA) they are constexpr half_t/bhalf_t, like the traits of
+// float and double: usable in constant expressions, converted to double
+// directly, without the copy-initialization warning of GCC's bf16 check. On HIP
+// and SYCL they stay bit patterns (BitComparisonWrapper), which convert to the
+// half type and compare with it at run time.
+#ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
+#define KOKKOS_IMPL_HALF_TRAIT_VALUE(HALF, BITS) \
+  static constexpr HALF value {                  \
+    HALF::bit_comparison_type { BITS }           \
+  }
+#else
+#define KOKKOS_IMPL_HALF_TRAIT_VALUE(HALF, BITS) \
+  static constexpr HALF::bit_comparison_type value { BITS }
+#endif
+
 ////////////// BEGIN HALF_T (binary16) limits //////////////
 // clang-format off
 // '\brief:' below are from the libc definitions for float and double:
@@ -57,7 +75,7 @@
 ///
 template <>
 struct Kokkos::Impl::infinity_helper<Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b0'11111'0000000000};
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b0'11111'0000000000);
 };
 
 /// \brief: Minimum normalized number
@@ -74,7 +92,7 @@ struct Kokkos::Impl::infinity_helper<Kokkos::Experimental::half_t> {
 template <>
 struct Kokkos::Impl::finite_min_helper<
     Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b1'11110'1111111111}; // -65504
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b1'11110'1111111111); // -65504
 };
 
 /// \brief: Maximum normalized number
@@ -91,7 +109,7 @@ struct Kokkos::Impl::finite_min_helper<
 template <>
 struct Kokkos::Impl::finite_max_helper<
     Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b0'11110'1111111111}; // +65504
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b0'11110'1111111111); // +65504
 };
 
 /// \brief: This is the difference between 1 and the smallest floating point
@@ -110,7 +128,7 @@ struct Kokkos::Impl::finite_max_helper<
 template <>
 struct Kokkos::Impl::epsilon_helper<
     Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b0'00101'0000000000}; // 0.0009765625
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b0'00101'0000000000); // 0.0009765625
 };
 
 /// @brief: The largest possible rounding error in ULPs
@@ -121,7 +139,7 @@ struct Kokkos::Impl::epsilon_helper<
 template <>
 struct Kokkos::Impl::round_error_helper<
     Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b0'01110'0000000000}; // 0.5
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b0'01110'0000000000); // 0.5
 };
 
 /// \brief: Minimum normalized positive half precision number
@@ -139,7 +157,7 @@ struct Kokkos::Impl::round_error_helper<
 template <>
 struct Kokkos::Impl::norm_min_helper<
     Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b0'00001'0000000000}; // 0.00006103515625
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b0'00001'0000000000); // 0.00006103515625
 };
 
 /// \brief: Smallest positive non-zero value
@@ -153,7 +171,7 @@ struct Kokkos::Impl::norm_min_helper<
 template <>
 struct Kokkos::Impl::denorm_min_helper<
     Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b0'00000'0000000001};
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b0'00000'0000000001);
 };
 
 /// \brief: Quiet not a half precision number
@@ -167,7 +185,7 @@ struct Kokkos::Impl::denorm_min_helper<
 template <>
 struct Kokkos::Impl::quiet_NaN_helper<
     Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b0'11111'1000000000};
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b0'11111'1000000000);
 };
 
 /// \brief: Signaling not a half precision number
@@ -181,7 +199,7 @@ struct Kokkos::Impl::quiet_NaN_helper<
 template <>
 struct Kokkos::Impl::signaling_NaN_helper<
     Kokkos::Experimental::half_t> {
-  static constexpr Kokkos::Experimental::half_t::bit_comparison_type value{0b0'11111'0100000000};
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::half_t, 0b0'11111'0100000000);
 };
 
 /// \brief: Number of digits in the matissa that can be represented
@@ -287,55 +305,55 @@ struct Kokkos::Impl::max_exponent10_helper<Kokkos::Experimental::half_t> {
 ///
 template <>
 struct Kokkos::Impl::infinity_helper<Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'11111111'0000000};
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b0'11111111'0000000);
 };
 
 // Minimum normalized number
 template <>
 struct Kokkos::Impl::finite_min_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b1'11111110'1111111}; // -3.38953139e38
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b1'11111110'1111111); // -3.38953139e38
 };
 // Maximum normalized number
 template <>
 struct Kokkos::Impl::finite_max_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'11111110'1111111}; // +3.38953139e3
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b0'11111110'1111111); // +3.38953139e3
 };
 // 1/2^7
 template <>
 struct Kokkos::Impl::epsilon_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'01111000'0000000}; // 0.0078125
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b0'01111000'0000000); // 0.0078125
 };
 template <>
 struct Kokkos::Impl::round_error_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'01111110'0000000}; // 0.5
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b0'01111110'0000000); // 0.5
 };
 // Minimum normalized positive bhalf number
 template <>
 struct Kokkos::Impl::norm_min_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'00000001'0000000}; // 1.175494351e-38
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b0'00000001'0000000); // 1.175494351e-38
 };
 /// Smallest positive non-zero bhalf
 template <>
 struct Kokkos::Impl::denorm_min_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'00000000'0000001}; // 2^(-133)=9.18355e-41
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b0'00000000'0000001); // 2^(-133)=9.18355e-41
 };
 // Quiet not a bhalf number
 template <>
 struct Kokkos::Impl::quiet_NaN_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'11111111'1000000};
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b0'11111111'1000000);
 };
 // Signaling not a bhalf number
 template <>
 struct Kokkos::Impl::signaling_NaN_helper<
     Kokkos::Experimental::bhalf_t> {
-  static constexpr Kokkos::Experimental::bhalf_t::bit_comparison_type value{0b0'11111111'0100000};
+  KOKKOS_IMPL_HALF_TRAIT_VALUE(Kokkos::Experimental::bhalf_t, 0b0'11111111'0100000);
 };
 // Number of base-RADIX digits in the mantissa: 7 fractional bits plus the
 // implicit leading 1, as numeric_limits<std::bfloat16_t>::digits.
@@ -390,5 +408,7 @@ struct Kokkos::Impl::max_exponent10_helper<Kokkos::Experimental::bhalf_t> {
 };
 #endif
 ////////////// END BHALF_T (bfloat16) limits //////////
+
+#undef KOKKOS_IMPL_HALF_TRAIT_VALUE
 
 #endif  // KOKKOS_HALF_NUMERIC_TRAITS_HPP_

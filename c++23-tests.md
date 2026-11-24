@@ -70,6 +70,21 @@ since both compute in float. Multiplication and division are already settled.
 A host-only version with a `std::complex<std::float16_t>` reference column is needed
 first. Low priority.
 
+### 3. B4c on the std backend: the half numeric traits as `constexpr` half values
+
+**What.** B4c (2026-11-24; `complex_half.md`, B4c status) makes the 9 value traits of
+`half_t` and `bhalf_t` (`infinity`, `epsilon`, `finite_max`, ...) `constexpr` half values
+wherever half is `constexpr`, which includes the std backend. Verified on CUDA, and for
+`half_t` with the GCC 12 shim; `bhalf_t` on the std backend needs GCC >= 13.
+
+**Run on Aurora:** `qsub run_std_half_fp16.sh`. The check is compile-time
+(`half_value_traits_are_constexpr_halves`, in `Kokkos_CoreUnitTest_Serial1`), so a
+successful build means it passes. Expected: all builds `ok (0 warnings)`, and
+`*numeric_traits*` 15 (`numeric_traits_half_vs_std_numeric_limits` included, now
+comparing `constexpr` half traits with `std::numeric_limits`), `*complex*:*atomic*` 27,
+`*half*` 16 tests, 16 passing (the two `*_constexpr_path_matches_runtime` tests run on
+the std backend too).
+
 ## Future work
 
 | Task | Why not now |

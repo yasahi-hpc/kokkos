@@ -112,7 +112,7 @@ complex tests for half/bhalf on A100 with only C1 relaxed.
 | H8 | `Kokkos_MathematicalFunctions.hpp:31-50` | `Impl::promote` defined only for `float`, `double`, `long double`, integers | std treats extended FP types as FP | cause of C10/C12 |
 | H9 | `Kokkos_Half_MathematicalFunctions.hpp:186-299` | `abs fabs fmod ... exp log sqrt hypot sin ... atan2 copysign`: compute in `float`, round to half (CUDA/HIP/SYCL/std override with native versions via `impl_<FUNC><false>`); mixed `(half, double)` → `double` | ok | all scalar functions `Kokkos::complex` needs are present; **no `fma`** (commented `// fma`, `:192`) |
 | H10 | `Kokkos_Half_MathematicalFunctions.hpp:558-565` | `real(half_t)`, `imag(half_t)` defined here | std: in `<complex>` | `conj`, `norm`, `arg`, `proj` for scalar half are missing |
-| H11 | `Kokkos_Half_NumericTraits.hpp:60-184` | `infinity_v`, `epsilon_v`, ... are `constexpr BitComparisonWrapper`, converting to `half_t` at runtime | std `numeric_limits<float16_t>` is `constexpr T` | `epsilon_v<half_t>` cannot be used directly as a double (half-complex step 6) |
+| H11 | `Kokkos_Half_NumericTraits.hpp:60-184` | `infinity_v`, `epsilon_v`, ... are `constexpr BitComparisonWrapper`, converting to `half_t` at runtime | std `numeric_limits<float16_t>` is `constexpr T` | `epsilon_v<half_t>` cannot be used directly as a double (half-complex step 6) (B4c, 2026-11-24: `constexpr half_t` where half is `constexpr`, std backend and CUDA) |
 | H12 | `Kokkos_Half_NumericTraits.hpp:324-333` | `digits_v<bhalf_t> = 2`, `digits10_v<bhalf_t> = 1` | `numeric_limits<std::bfloat16_t>`: `digits = 8`, `digits10 = 2` | **bug**; any tolerance based on `digits` is wrong for bhalf |
 | H13 | `Kokkos_STD_Half_Conversion.hpp:18-60` | `cast_to_half`/`cast_from_half` are `inline`, not `constexpr`, though they are plain `std::float16_t` conversions | could be `constexpr` at no cost | enables `constexpr` on the std backend |
 | H14 | `Cuda/Kokkos_Cuda_Half_Conversion.hpp:15-50` | intrinsics `__float2half`, ... | CUDA 12.6: only `__half(const __half_raw&)` is `constexpr`; `operator __half_raw()` is not | `constexpr` on CUDA needs a software path (D6) |
@@ -1642,7 +1642,7 @@ results and return types statically, the absence of `conj`/`proj(half_t)` and of
 `promote_2<half_t, bhalf_t>`, and runs `norm`, `arg` (including `arg(-0) = pi`) and
 mixed `pow` on the host and in a kernel.
 
-**B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — B4a and B4b-CUDA IMPLEMENTED (2026-11-24); B4b-HIP, B4b-SYCL, B4c FUTURE WORK.**
+**B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — B4a, B4b-CUDA and B4c IMPLEMENTED (2026-11-24); B4b-HIP, B4b-SYCL FUTURE WORK.**
 *B4a status (2026-11-24): implemented (`545a6aa5a`), verified on Aurora (job 9121273, see below).*
 - **Code:** `Kokkos_Half_FloatingPointWrapper.hpp` defines `KOKKOS_IMPL_HALF_CONSTEXPR`
   (`constexpr` when `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` or `..._BHALF_...` is
@@ -1742,6 +1742,50 @@ too. And the full-type branches (device pass only) need their own fallback. So:
   nvcc/hipcc/icpx first.
 - **B4c (optional).** Numeric traits as `constexpr half_t` (H11), once B4b exists. Today's
   `BitComparisonWrapper` return type is public API, so this needs care.
+
+  *B4c status (2026-11-24): implemented where half is `constexpr`; verified on CUDA (A100 jobs 10420748-50); the std backend (Aurora) is to run.*
+  - **The care, reconciled with the source:** `BitComparisonWrapper` lives in
+    `Kokkos::Experimental::Impl`. It is reachable as `half_t::bit_comparison_type` and
+    is the type of `infinity_v<half_t>` and the other value traits. Nothing in Kokkos
+    depends on that type: the library uses the traits only through comparison and
+    conversion (`Kokkos_BitManipulation.hpp`, the half math functions, the reduction
+    identities, the stream extraction). Both work the same with a `half_t`. The bit
+    masks (`exponent_mask`, `fraction_mask`) are not numeric traits and stay
+    `BitComparisonWrapper`. User code that reads `.value` (the raw bits) of a trait
+    would break on the backends below.
+  - **Change** (`Kokkos_Half_NumericTraits.hpp`): the 9 value traits of `half_t` and of
+    `bhalf_t` (`infinity`, `finite_min`, `finite_max`, `epsilon`, `round_error`,
+    `norm_min`, `denorm_min`, `quiet_NaN`, `signaling_NaN`) are, through
+    `KOKKOS_IMPL_HALF_TRAIT_VALUE`:
+    - `static constexpr half_t value{bit_comparison_type{bits}}` where
+      `KOKKOS_IMPL_HALF_IS_CONSTEXPR` (std backend, CUDA);
+    - the bit pattern as before on HIP and SYCL, where half values cannot be
+      `constexpr` (B4b-HIP/-SYCL).
+
+    So the type of `infinity_v<half_t>` depends on the backend, as `constexpr` half
+    itself does. The values and bits are the same.
+  - **Gained** (H11): `static_cast<double>(epsilon_v<half_t>)`, arithmetic on the
+    constants (`finite_max_v<half_t> / 2`) and their use in constant expressions,
+    as for `float`/`double`; and `bhalf_t x = infinity_v<bhalf_t>;` no longer
+    converts between classes, so GCC's bf16 false positive (§8.2) does not apply to it.
+  - **Test:** `half_value_traits_are_constexpr_halves<H>()` (`TestNumericTraits.hpp`,
+    `static_assert`ed for `half_t`/`bhalf_t` under `KOKKOS_IMPL_HALF_IS_CONSTEXPR`):
+    each trait has type `H`, has the IEEE value (as `double`), the NaNs are unordered,
+    and arithmetic on the constants works. The existing trait tests (`*numeric_traits*`,
+    `numeric_traits_half_vs_std_numeric_limits`) check the bits.
+  - **Checked:**
+    - CUDA: 212 objects compile with 0 `warning #`; A100 jobs 10420748 (`*half*` 14
+      pass, 2 std-only skips), 10420749 (`*complex*:*atomic*` 27/27 on Serial and
+      Cuda), 10420750 (`*numeric_traits*` 14 pass on Serial1 and Cuda1, the std-only
+      comparison skips). So the traits work as `constexpr` half values in both nvcc
+      passes and in device code.
+    - GCC 12 shim (std backend for `half_t`): the B4c checks compile; 41 of 42
+      `*numeric_traits*:*mathematical_functions*` tests pass. The exception is
+      `numeric_traits_half_vs_std_numeric_limits`, because GCC 12's libstdc++ has no
+      `numeric_limits<_Float16>`: a shim artifact; that test passes with GCC 14
+      (Aurora). 27 complex and 9 conversion tests pass.
+    - Host (`half_t` = float): unchanged, all pass, 0 warnings.
+    - To run: `run_std_half_fp16.sh` on Aurora (`bhalf_t` on the std backend).
 
 *B4 status (2026-11-22): B4a blocked here (no GCC ≥ 13). B4b prototype verified on
 host and A100 (jobs 10396298, 10396345, 10396374). `constexpr` was checked per backend
@@ -2196,7 +2240,7 @@ expressions. The run-time twins (`complex_constexpr_checks_at_runtime`) stay for
 backend. Compile-checked with the GCC 12 shim (B4a); verified on Aurora for `half_t` and
 `bhalf_t` (job 9121273, with B4a).
 
-**CH6 (optional, performance; from §3b). Paired-half arithmetic on CUDA.** libcu++ stores
+**CH6 (optional, performance; from §3b). Paired-half arithmetic on CUDA. — FUTURE WORK (decided 2026-11-24).** libcu++ stores
 `complex<__half>` as a `__half2` (`alignas(4)`) and uses `__hadd2`, `__hsub2` and
 `__hbeq2` for `+= -= ==`. A Kokkos equivalent:
 - Keep the two-member layout, which keeps the tuple protocol and `real()&` references
@@ -2815,5 +2859,5 @@ Still open but testable **on this machine** (no other machine needed):
   10397183, all 14 `*numeric_traits*` tests pass on Serial and Cuda.
 - **H17:** fixed on CUDA (see CH1 notes).
 - ~~**B4b-CUDA** (and CH5 on CUDA)~~: done 2026-11-24, verified on the A100 (jobs 10415931-33).
-- **CH6:** a benchmark of code bound by instruction issue, if paired `__half2` should be
+- **CH6 (future work, decided 2026-11-24):** a benchmark of code bound by instruction issue, if paired `__half2` should be
   reconsidered.

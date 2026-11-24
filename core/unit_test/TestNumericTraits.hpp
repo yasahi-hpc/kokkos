@@ -483,8 +483,8 @@ void test_half_traits_vs_numeric_limits() {
   using L = std::numeric_limits<F>;
   static_assert(sizeof(H) == 2 && sizeof(F) == 2);
   auto bits = [](auto x) { return Kokkos::bit_cast<std::uint16_t>(x); };
-  // Direct initialization: the traits are bit patterns
-  // (BitComparisonWrapper) for half types.
+  // Direct initialization: the traits are half values on the std backend
+  // (B4c), bit patterns (BitComparisonWrapper) elsewhere.
   EXPECT_EQ(bits(H(Kokkos::infinity<H>::value)), bits(L::infinity()));
   EXPECT_EQ(bits(H(Kokkos::epsilon<H>::value)), bits(L::epsilon()));
   EXPECT_EQ(bits(H(Kokkos::round_error<H>::value)), bits(L::round_error()));
@@ -521,6 +521,50 @@ void test_half_traits_vs_numeric_limits() {
   EXPECT_EQ(Kokkos::min_exponent10<H>::value, L::min_exponent10);
   EXPECT_EQ(Kokkos::max_exponent10<H>::value, L::max_exponent10);
 }
+#endif
+
+// B4c: where half values are constexpr (std backend, CUDA), the distinguished
+// values of half_t and bhalf_t are constexpr half values, like those of float
+// and double (H11); on HIP and SYCL they stay bit patterns.
+#ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
+template <class H>
+constexpr bool half_value_traits_are_constexpr_halves() {
+  using namespace Kokkos::Experimental;
+  constexpr bool bf16 = Kokkos::Experimental::Impl::is_bfloat16<H>::value;
+  auto is_h           = [](auto x) {
+    return std::is_same_v<std::remove_cv_t<decltype(x)>, H>;
+  };
+  static_assert(is_h(infinity_v<H>) && is_h(finite_min_v<H>) &&
+                is_h(finite_max_v<H>) && is_h(epsilon_v<H>) &&
+                is_h(round_error_v<H>) && is_h(norm_min_v<H>) &&
+                is_h(denorm_min_v<H>) && is_h(quiet_NaN_v<H>) &&
+                is_h(signaling_NaN_v<H>));
+  static_assert(static_cast<double>(epsilon_v<H>) == (bf16 ? 0x1p-7 : 0x1p-10));
+  static_assert(static_cast<double>(round_error_v<H>) == 0.5);
+  static_assert(static_cast<double>(finite_max_v<H>) ==
+                (bf16 ? 0x1.fep127 : 65504.0));
+  static_assert(finite_min_v<H> == -finite_max_v<H>);
+  static_assert(static_cast<double>(norm_min_v<H>) ==
+                (bf16 ? 0x1p-126 : 0x1p-14));
+  static_assert(static_cast<double>(denorm_min_v<H>) ==
+                (bf16 ? 0x1p-133 : 0x1p-24));
+  static_assert(infinity_v<H> > finite_max_v<H>);
+  static_assert(-infinity_v<H> < finite_min_v<H>);
+  static_assert(quiet_NaN_v<H> != quiet_NaN_v<H>);
+  static_assert(signaling_NaN_v<H> != signaling_NaN_v<H>);
+  // Arithmetic directly on the constants (H11).
+  static_assert(finite_max_v<H> / H(2) < finite_max_v<H>);
+  static_assert(H(1) + epsilon_v<H> > H(1));
+  return true;
+}
+#if !KOKKOS_HALF_T_IS_FLOAT
+static_assert(
+    half_value_traits_are_constexpr_halves<Kokkos::Experimental::half_t>());
+#endif
+#if !KOKKOS_BHALF_T_IS_FLOAT
+static_assert(
+    half_value_traits_are_constexpr_halves<Kokkos::Experimental::bhalf_t>());
+#endif
 #endif
 
 TEST(TEST_CATEGORY, numeric_traits_half_vs_std_numeric_limits) {

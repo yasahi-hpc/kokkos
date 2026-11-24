@@ -24,6 +24,7 @@ All verified on the A100, host (Serial) and device (Cuda):
 | B4a, CH5 | CUDA unchanged by the std-backend `constexpr` (macro empty) | 10415251, 10415253 |
 | A8 | `std::complex` interop deprecated except the converting constructor; 27/27 complex tests on Serial and Cuda, including the deprecated-interop test for `half_t`/`bhalf_t`; 0 nvcc warnings | 10415439 |
 | B4b-CUDA, CH5 on CUDA | `constexpr half_t`/`bhalf_t` and `constexpr complex<half_t>` on CUDA: software conversions in constant evaluation, bit-identical to the hardware on every pattern, midpoint and 64-bit integer (host and device); B4a/CH5 `static_assert`s hold in both nvcc passes; `*half*` 14 pass, complex 27/27, numeric traits 14 | 10415931, 10415932, 10415933 |
+| B4c | the half numeric traits are `constexpr half_t`/`bhalf_t` on CUDA (bit patterns on HIP/SYCL): compile-time checks hold in both nvcc passes; `*half*` 14, complex 27/27, numeric traits 14 on Serial and Cuda | 10420748, 10420749, 10420750 |
 | B4b-CUDA prototype | software `constexpr` conversions for `__half`/`__nv_bfloat16`: 0 mismatches over all floats, all bit patterns and all 65536² arithmetic pairs (non-NaN) | 10396298, 10396345, 10396374 |
 | CH6 benchmark | paired `__half2` arithmetic: no gain. It halves the instruction count (nvcc does not pair the scalar operations), but the measured kernels are bound by memory bandwidth or latency; results bit-identical | 10397058 |
 
@@ -75,8 +76,7 @@ host-side contraction.
 
 | Task | Why not now |
 |---|---|
-| **B4c:** numeric traits as `constexpr half_t` rather than `BitComparisonWrapper` | needs B4b; changes public API |
-| **CH6 revisit:** paired `__half2` arithmetic | only if a benchmark of instruction-bound code (not memory-bound) shows a gain |
+| **CH6:** paired `__half2` arithmetic (future work, decided 2026-11-24) | only if a benchmark of instruction-bound code (not memory-bound) shows a gain |
 | **Pre-Ampere bf16 double rounding:** before sm_80, `double` and 64-bit integers convert to `bfloat16` through `float`, rounding twice (`Kokkos_Cuda_Half_Conversion.hpp`) | known gap, unfixed; needs an NVIDIA GPU older than sm_80, which none of the available machines has |
 | **C++23 with nvcc** (CUDA ≥ 13.3, per Kokkos 5.2.0) | CUDA 12.6 here. With the CUDA backend `half_t` stays `__half`, so this is mainly a compile check |
 

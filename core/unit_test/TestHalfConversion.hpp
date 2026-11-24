@@ -158,8 +158,9 @@ inline void test_bhalf_bool_cast_functions() {
   EXPECT_EQ(errors, 0);
 }
 
-// Assigning a numeric-trait constant (a BitComparisonWrapper where H is a half
-// type) goes through floating_point_wrapper::operator=(T), which needs
+// Assigning a numeric-trait constant (a BitComparisonWrapper on HIP and SYCL;
+// on the std backend and CUDA a half value since B4c) goes through
+// floating_point_wrapper::operator=(T), which needs
 // cast_to_half(half_t)/cast_to_bhalf(bhalf_t); the std backend lacked them, so
 // this failed to link. The result must have the bits of the constant.
 template <class H>
