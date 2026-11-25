@@ -87,9 +87,38 @@ fourth run.
 
 ## Open
 
-The job script and what it checks (part 1, done above):
+### 0. Verify B4b-SYCL and CH5 on SYCL (implemented 2026-11-25)
 
-No code changes; one Aurora job:
+`constexpr` `half_t`/`bhalf_t` on SYCL, and with it CH5 (`constexpr complex<half_t>`) and
+B4c (the numeric traits as half values). As B4b-CUDA:
+- `KOKKOS_IMPL_HALF_CONSTEXPR` and `KOKKOS_IMPL_HALF_IS_CONSTEXPR` are now defined on SYCL;
+  `KOKKOS_IMPL_HALF_SOFTWARE_PATH()` is `__builtin_is_constant_evaluated()` in the device
+  pass and stays `true` in the host pass (the host rounding fix).
+- Every cast in `Kokkos_SYCL_Half_Conversion.hpp` is `constexpr`, and each non-identity one
+  starts with the software branch (`Impl::half_constexpr_from`/`_to`). The wrapper needed
+  no change.
+- Compile-checked here with icpx 2024.0 in both passes, with a fake SYCL configuration
+  (`claude_builds/complex/fakesycl/t.cpp`): `static_assert`s on both types pass, including
+  a `constexpr` product inside a kernel, and a planted false assertion fails. Not run: no
+  device here has fp16.
+
+Rerun part 1 unchanged: `qsub run_sycl_aurora.sh`. Expected now:
+
+| Check | Expected (was) |
+|---|---|
+| probe | `HALF_IS_CONSTEXPR=1` (0); the other macros unchanged |
+| build | succeeds. The B4a, CH5 and B4c `static_assert`s (`TestHalfConversion.hpp`, `TestComplex.hpp`, `TestNumericTraits.hpp`) compile in both passes |
+| `*complex*:*atomic*` | 27 pass on Serial and SYCL (unchanged; CH5 is compile-time only) |
+| `*numeric_traits*` | 14 pass, 1 skip (unchanged) |
+| `*half*` | 14 pass, 2 skip (12 + 4): `half_constexpr_path_matches_runtime` and `bhalf_...` now run. Their device part compares the software path with the Intel GPU's conversions bit for bit (every pattern, the midpoints, 64-bit integers); on the host both sides use the software path |
+
+If a `*_constexpr_path_*` test fails on the device, the GPU's conversion disagrees with
+round-to-nearest-even somewhere (the log counts the mismatches); compare with the host
+rounding bug, which was the same kind of finding.
+
+### Part 1, the job script and what it checks (done above)
+
+One Aurora job:
 
 ```bash
 qsub run_sycl_aurora.sh
@@ -117,7 +146,7 @@ qsub run_sycl_aurora.sh
 |---|---|---|
 | `*complex*:*atomic*` | `Serial_SmokeTest`, `SYCL_SmokeTest` | 27 pass, as on CUDA. They include A8's interop tests: `complex_std_interop_deprecated` also runs for the native `half_t`/`bhalf_t` |
 | `*numeric_traits*` | `Serial1`, `SYCL1B` | 14 pass, 1 skip (the `std::numeric_limits` comparison is std-backend only) |
-| `*half*` | `Default` (default execution space = SYCL) | 16 tests, 12 pass. 4 skip: `half_io_vs_std` and `bhalf_io_vs_std` (std backend only), and `half_constexpr_path_matches_runtime` and `bhalf_...` (half is not `constexpr` on SYCL yet, B4b-SYCL) |
+| `*half*` | `Default` (default execution space = SYCL) | 16 tests, 12 pass. 4 skip: `half_io_vs_std` and `bhalf_io_vs_std` (std backend only), and `half_constexpr_path_matches_runtime` and `bhalf_...` (until B4b-SYCL; with it 14 pass, 2 skip, see 0.) |
 
 Things to check that are specific to SYCL (§8.4):
 - **`KOKKOS_HAS_NATIVE_BHALF_TYPE`:** defined only with
@@ -133,8 +162,8 @@ Things to check that are specific to SYCL (§8.4):
   by `half_same`, `TestHalfIO`'s round trip, and the cast and constexpr-path tests.
 - **Declared casts** (`*_cast_overloads`, the H18 pattern): on SYCL the casts come from
   `Kokkos_SYCL_Half_Conversion.hpp`, which no test run has compiled yet.
-- **B4c:** on SYCL the numeric traits stay bit patterns (`BitComparisonWrapper`),
-  because half is not `constexpr` there. The tests confirm nothing else depends on that.
+- **B4c:** before B4b-SYCL the numeric traits stayed bit patterns
+  (`BitComparisonWrapper`) on SYCL; with it they are half values (see 0.).
 
 ### 2. Optional: the complete core test suite on SYCL
 
@@ -148,9 +177,7 @@ branch.
 
 | Task | Notes |
 |---|---|
-| **B4b-SYCL:** `constexpr` `half_t`/`bhalf_t` on SYCL | First recheck the premise with Aurora's oneAPI version (`b4sycl.cpp`). Then as B4b-CUDA: `KOKKOS_IMPL_HALF_CONSTEXPR`, `KOKKOS_IMPL_HALF_IS_CONSTEXPR` and `KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()` also for SYCL. The cast functions in `Kokkos_SYCL_Half_Conversion.hpp` become `constexpr`, with the constant-evaluation branch into `Impl::half_constexpr_from`/`_to` (the software path; needed for bfloat16, harmless for `sycl::half`). The wrapper's native-operator branches already have the fallback (`KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH` is always defined on SYCL). Tests: the compile-time checks of B4a and CH5, and `*_constexpr_path_matches_runtime` against the Intel GPU's conversions |
-| **CH5 on SYCL:** `constexpr complex<half_t>` | needs B4b-SYCL; then only the existing `static_assert`s, as on CUDA |
-| **B4c on SYCL:** the numeric traits as `constexpr` half values | follows from B4b-SYCL automatically: the traits are half values wherever `KOKKOS_IMPL_HALF_IS_CONSTEXPR` is defined |
+| (B4b-SYCL, CH5 and B4c on SYCL: implemented 2026-11-25, moved to Open, 0.) | |
 
 Not SYCL, listed elsewhere: HIP (`complex_half.md` §8.3), CUDA (`cuda-tests.md`), the std
 backend (`c++23-tests.md`).
@@ -160,4 +187,5 @@ backend (`c++23-tests.md`).
 | File | Purpose |
 |---|---|
 | `tmp/claude_builds/complex_a6/b4sycl.cpp` | the B4b-SYCL premise check (compile only) |
+| `/home/i18048/claude_builds/complex/fakesycl/` | the B4b-SYCL compile check: `t.cpp`, and `inc/` (the host config with `KOKKOS_ENABLE_SYCL`, `Kokkos_Setup_SYCL.hpp` in the setup header); `icpx -std=c++20 -fp-model=precise -fsycl [-fsycl-device-only] -fsyntax-only -Iinc -I<kokkos>/core/src t.cpp` after `module purge; module load intel/2024.0.0` |
 | `run_sycl_aurora.sh` | part 1 (and part 2 with `FULL=ON`) on Aurora |

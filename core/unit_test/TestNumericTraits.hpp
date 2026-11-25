@@ -523,9 +523,9 @@ void test_half_traits_vs_numeric_limits() {
 }
 #endif
 
-// B4c: where half values are constexpr (std backend, CUDA), the distinguished
-// values of half_t and bhalf_t are constexpr half values, like those of float
-// and double (H11); on HIP and SYCL they stay bit patterns.
+// B4c: where half values are constexpr (std backend, CUDA, SYCL), the
+// distinguished values of half_t and bhalf_t are constexpr half values, like
+// those of float and double (H11); on HIP they stay bit patterns.
 #ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
 template <class H>
 constexpr bool half_value_traits_are_constexpr_halves() {

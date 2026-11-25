@@ -163,8 +163,8 @@ inline void test_bhalf_bool_cast_functions() {
   EXPECT_EQ(errors, 0);
 }
 
-// Assigning a numeric-trait constant (a BitComparisonWrapper on HIP and SYCL;
-// on the std backend and CUDA a half value since B4c) goes through
+// Assigning a numeric-trait constant (a BitComparisonWrapper on HIP; on the
+// std backend, CUDA and SYCL a half value since B4c) goes through
 // floating_point_wrapper::operator=(T), which needs
 // cast_to_half(half_t)/cast_to_bhalf(bhalf_t); the std backend lacked them, so
 // this failed to link. The result must have the bits of the constant.
@@ -336,10 +336,10 @@ void test_half_cast_overloads() {
   EXPECT_EQ(errors, 0);
 }
 
-// constexpr half_t and bhalf_t on the std backend (B4a) and on CUDA (B4b-CUDA):
-// conversions, arithmetic, comparisons, compound assignment and the
-// numeric-trait constants are constant expressions. Not on HIP and SYCL (future
-// work).
+// constexpr half_t and bhalf_t on the std backend (B4a), on CUDA (B4b-CUDA)
+// and on SYCL (B4b-SYCL): conversions, arithmetic, comparisons, compound
+// assignment and the numeric-trait constants are constant expressions. Not on
+// HIP (future work).
 #ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
 template <class H>
 constexpr H half_constexpr_compound() {
@@ -380,11 +380,12 @@ static_assert(half_constexpr_checks<Kokkos::Experimental::bhalf_t>());
 #endif
 
 // The conversions used during constant evaluation (Impl::half_constexpr_from,
-// Impl::half_constexpr_to; the software path on CUDA) agree with the run-time
-// conversions bit for bit, on the host and in a kernel: every bit pattern
-// (decoded, and encoded back), the exact midpoints between neighbours and the
-// doubles next to them (where rounding through float would round twice), and
-// 64-bit integers. NaNs are not compared (their bits are not specified).
+// Impl::half_constexpr_to; the software path on CUDA and SYCL) agree with the
+// run-time conversions bit for bit, on the host and in a kernel: every bit
+// pattern (decoded, and encoded back), the exact midpoints between neighbours
+// and the doubles next to them (where rounding through float would round
+// twice), and 64-bit integers. NaNs are not compared (their bits are not
+// specified).
 #if defined(KOKKOS_IMPL_HALF_IS_CONSTEXPR)
 template <class H>
 KOKKOS_FUNCTION int check_half_constexpr_path(std::uint32_t i) {

@@ -2262,10 +2262,10 @@ static_assert(Kokkos::complex<float>(-5, 10) / Kokkos::complex<double>(3, 4) ==
               Kokkos::complex<double>(1, 2));
 
 // constexpr complex<half_t> and complex<bhalf_t> (CH5). On the std backend
-// (C++23 std::float16_t / std::bfloat16_t; B4a) and on CUDA (B4b-CUDA) half
-// values are constant expressions, so the checks above run for the half types
-// too. The HIP and SYCL half types are not constexpr (future work): there only
-// the run-time twins below run.
+// (C++23 std::float16_t / std::bfloat16_t; B4a), on CUDA (B4b-CUDA) and on
+// SYCL (B4b-SYCL) half values are constant expressions, so the checks above
+// run for the half types too. The HIP half types are not constexpr (future
+// work): there only the run-time twins below run.
 #ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
 // Division as above, with tolerances for the half types: the range checks of
 // test_division_in_constant_expression are tighter than half precision.

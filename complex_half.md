@@ -1642,7 +1642,7 @@ results and return types statically, the absence of `conj`/`proj(half_t)` and of
 `promote_2<half_t, bhalf_t>`, and runs `norm`, `arg` (including `arg(-0) = pi`) and
 mixed `pow` on the host and in a kernel.
 
-**B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — B4a, B4b-CUDA and B4c IMPLEMENTED (2026-11-24); B4b-HIP, B4b-SYCL FUTURE WORK.**
+**B4. `constexpr` half (H1, H2, H5, H13-H15, D6). — B4a, B4b-CUDA and B4c IMPLEMENTED (2026-11-24); B4b-SYCL IMPLEMENTED (2026-11-25, to verify on Aurora); B4b-HIP FUTURE WORK.**
 *B4a status (2026-11-24): implemented (`545a6aa5a`), verified on Aurora (job 9121273, see below).*
 - **Code:** `Kokkos_Half_FloatingPointWrapper.hpp` defines `KOKKOS_IMPL_HALF_CONSTEXPR`
   (`constexpr` when `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` or `..._BHALF_...` is
@@ -1728,6 +1728,37 @@ too. And the full-type branches (device pass only) need their own fallback. So:
   - The first submission (jobs 10415877-79) failed before compiling: `cmake --build`
     run from the `/home` symlink path had written that path into `build_gpu`'s build
     files, which the compute nodes cannot see. Fixed by regenerating from `/work`.
+
+*B4b-SYCL status (2026-11-25): implemented; compile-checked here (DPC++ 2024.0), to verify on Aurora (`run_sycl_aurora.sh`).*
+As B4b-CUDA, with one SYCL-specific difference: the host pass already uses the
+software conversions and the float path at run time (the DPC++ host rounding bug, H17
+notes), so only the device pass switches on constant evaluation.
+- **Macros:** `KOKKOS_IMPL_HALF_CONSTEXPR` (`constexpr`) and
+  `KOKKOS_IMPL_HALF_IS_CONSTEXPR` now also on SYCL. `KOKKOS_IMPL_HALF_SOFTWARE_PATH()`
+  (renamed from `KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()` with the host fix) is
+  `__builtin_is_constant_evaluated()` in the SYCL device pass (was `false`) and stays
+  `true` in the host pass.
+- **SYCL casts** (`Kokkos_SYCL_Half_Conversion.hpp`): all `cast_to_*`/`cast_from_*`
+  are `constexpr`; every non-identity one begins with the software branch
+  (`Impl::half_constexpr_from`/`_to`), so also `bfloat16`, whose `bfloat16(float)` is
+  not `constexpr`, and the integer conversions. At run time on the device they still
+  use `sycl::half`/`bfloat16`'s own conversions.
+- **Wrapper:** no change; the fallbacks of B4b-CUDA cover SYCL
+  (`KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH` is always defined there).
+- **Follows automatically:** the B4a checks, CH5 (`constexpr complex<half_t>`) and B4c
+  (the numeric traits as half values) on SYCL; `half_constexpr_path_matches_runtime`
+  and `bhalf_...` now run instead of skipping. Their device part compares the software
+  path with the Intel GPU's conversions; on the host both sides use the software path.
+- **Checked here** (icpx 2024.0, a fake SYCL configuration: the host build's config
+  with `KOKKOS_ENABLE_SYCL` and `Kokkos_Setup_SYCL.hpp`;
+  `claude_builds/complex/fakesycl/t.cpp`): `static_assert`s on `half_t` and `bhalf_t`
+  arithmetic, conversions to `int`/`bool`, comparisons, unary minus, compound
+  assignment with `float`/`double`, `epsilon`, subnormal ties, and a `constexpr`
+  product inside a kernel, all pass in the host and `-fsycl-device-only` passes with 0
+  warnings (`-fp-model=precise`). A planted false assertion fails, so the checks are
+  evaluated. Not run: the CPU OpenCL device here has no `fp16` aspect. The host, shim
+  and CUDA builds are unaffected: the changes are inside SYCL-only preprocessor
+  branches, plus comments.
 
 *The analysis and the verified CUDA prototype below are the basis of B4b-CUDA.*
 - **B4a, std backend.** Mark these `constexpr`:
@@ -1845,7 +1876,8 @@ awaits a decision.* Reconciled with the source:
   not a future task, but it is split per backend:
   - **B4b-CUDA:** ready (prototype verified).
   - **B4b-SYCL:** half is trivial; bf16 reuses the CUDA path. Only compile-time tests are
-    possible here.
+    possible here. *Implemented 2026-11-25 (status above): the software path for both
+    types, which also covers the host pass.*
   - **B4b-HIP:** **future task.** It is unverifiable here, and it is better solved
     upstream: a `constexpr` bits accessor, or `constexpr` conversions in ROCm's
     `amd_hip_fp16.h`, would make it as easy as SYCL. Until then, keep the HIP path
@@ -2229,7 +2261,7 @@ Trade-offs:
   `complex(const std::complex<RealType>&)`; the template replaces that one.
 - Prefer it to the half-only version if the D4 trait is in place.
 
-**CH5. `constexpr complex<half_t>` (needs B4a, and B4b for GPU backends). — std and CUDA parts IMPLEMENTED (2026-11-24); HIP and SYCL FUTURE WORK, with B4b.** Enable
+**CH5. `constexpr complex<half_t>` (needs B4a, and B4b for GPU backends). — std and CUDA parts IMPLEMENTED (2026-11-24); SYCL part with B4b-SYCL (2026-11-25, to verify on Aurora); HIP FUTURE WORK, with B4b.** Enable
 the `static_assert(... <half_t>())` lines in `TestComplex.hpp` under
 `KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT` (and for GPU backends once B4b exists). Keep the
 runtime twins elsewhere.
@@ -2847,8 +2879,8 @@ Configure `-DKokkos_ENABLE_SYCL=ON -DKokkos_ARCH_INTEL_<GEN>=ON` with icpx. Chec
 - **Compile-time check of B4b-SYCL's premise** with the installed DPC++ version:
   `b4sycl.cpp` (`sycl::half` native `constexpr`, bfloat16 not).
 
-*Future task:* **B4b-SYCL.** `sycl::half` only needs the wrapper marked `constexpr`;
-bfloat16 needs the CUDA software path. Testable at run time only here.
+~~*Future task:* **B4b-SYCL.**~~ Implemented 2026-11-25 (B4 notes, B4b-SYCL status);
+to verify on Aurora.
 
 ### 8.5 Remaining tasks that cannot be tested on this machine
 
@@ -2868,7 +2900,7 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | CH4: converting constructor from `std::complex<std::float16_t>` (D11) | **future work** (2026-11-24): `std::float16_t` needs C++23, Kokkos's minimum is C++20; pick up once C++23 is the minimum | GCC ≥ 13 |
 | ~~CH5: `constexpr complex<half_t>`, std part~~ | done 2026-11-24 (tests only), verified on Aurora (job 9121273) | GCC ≥ 13 |
 | B4b-HIP (and CH5 on HIP) | future work, needs a workaround | AMD GPU |
-| B4b-SYCL (and CH5 on SYCL) | future work | Intel GPU (compile-time checks also here) |
+| B4b-SYCL (and CH5 on SYCL) | implemented 2026-11-25, compile-checked here (icpx 2024.0, both passes); to verify: `qsub run_sycl_aurora.sh` (`HALF_IS_CONSTEXPR=1`; `*half*` 14 + 2 skipped) | Aurora |
 | Locale branch of `half_io` (a decimal comma through the stream's locale) | **future work** (decided 2026-11-23, not a priority); never run: no machine has `de_DE`/`fr_FR` UTF-8 locales | any machine with those locales, or a user-built one (`localedef`, `LOCPATH`) |
 | ~~**GNU dialect** `-std=gnu++23`, Kokkos's default for GCC~~ | done 2026-11-23, job 9117216: same probe values and test results as strict `-std=c++23`, with and without native half (§8.2) | Aurora |
 | ~~**Declared but undefined cast functions** (the H18 pattern)~~ | done 2026-11-23: `half_cast_overloads`/`bhalf_cast_overloads` pass on the std backend (job 9117216, four builds) and on CUDA (job 10404595); none missing. HIP/SYCL: run the same tests there (§8.3, §8.4) | Aurora, A100; HIP/SYCL pending |

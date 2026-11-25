@@ -35,7 +35,11 @@
 //   that use the CUDA types' own arithmetic (KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH,
 //   device pass) compute in float, rounding once, which gives the same result
 //   for + - * / and the conversions. At run time nothing changes.
-// - HIP and SYCL: not constexpr (B4b-HIP, B4b-SYCL: future work).
+// - SYCL (B4b-SYCL): as CUDA. sycl::half is constexpr but
+//   sycl::ext::oneapi::bfloat16 is not, so the cast functions use the same
+//   software conversions during constant evaluation (device pass), and always
+//   in the host pass (below).
+// - HIP: not constexpr (B4b-HIP: future work).
 // - SYCL host: DPC++'s host conversion sycl::half(float) rounds wrongly below
 //   2^-13 (it truncates, and ties do not go to even; seen with oneAPI 2024.0
 //   and 2026.1), and sycl::half's host arithmetic converts back through it.
@@ -47,7 +51,8 @@
 // KOKKOS_IMPL_HALF_IS_CONSTEXPR tells tests (and CH5) that half values can
 // appear in constant expressions; KOKKOS_IMPL_HALF_SOFTWARE_PATH() is true
 // where the software conversions and the float path are used: during constant
-// evaluation on CUDA, and in the SYCL host pass.
+// evaluation on CUDA and in the SYCL device pass, and always in the SYCL host
+// pass.
 #if defined(KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT) || \
     defined(KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT)
 #define KOKKOS_IMPL_HALF_IS_CONSTEXPR
@@ -58,9 +63,10 @@
 #define KOKKOS_IMPL_HALF_CONSTEXPR constexpr
 #define KOKKOS_IMPL_HALF_SOFTWARE_PATH() __builtin_is_constant_evaluated()
 #elif defined(KOKKOS_ENABLE_SYCL)
-#define KOKKOS_IMPL_HALF_CONSTEXPR
+#define KOKKOS_IMPL_HALF_IS_CONSTEXPR
+#define KOKKOS_IMPL_HALF_CONSTEXPR constexpr
 #ifdef __SYCL_DEVICE_ONLY__
-#define KOKKOS_IMPL_HALF_SOFTWARE_PATH() false
+#define KOKKOS_IMPL_HALF_SOFTWARE_PATH() __builtin_is_constant_evaluated()
 #else
 #define KOKKOS_IMPL_HALF_SOFTWARE_PATH() true
 #endif

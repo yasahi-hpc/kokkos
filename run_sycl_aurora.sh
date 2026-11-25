@@ -128,7 +128,7 @@ EOF
   grep '^PROBE_' "$LOG_DIR/half_probe.out" | sed 's/^PROBE_/  /'
   grep -q '^PROBE_' "$LOG_DIR/half_probe.out" ||
     { echo "  probe failed:"; grep -m5 error "$LOG_DIR/half_probe.out"; }
-  echo "  (expected: NATIVE_HALF=1, NATIVE_BHALF=1, HALF_IS_CONSTEXPR=0, HALF_T_IS_FLOAT=false, BHALF_T_IS_FLOAT=false)"
+  echo "  (expected: NATIVE_HALF=1, NATIVE_BHALF=1, HALF_IS_CONSTEXPR=1, HALF_T_IS_FLOAT=false, BHALF_T_IS_FLOAT=false)"
 fi
 
 # The executables: complex in <B>_SmokeTest, numeric traits in Serial1 / SYCL1B,
@@ -182,6 +182,6 @@ for i in "${!STEP_NAMES[@]}"; do
   case "${STEP_RESULTS[$i]}" in ok*|*tests*) ;; *) status=1 ;; esac
 done
 echo "expected: complex/atomic 27 (Serial and SYCL); numeric_traits 14 + 1 skipped;"
-echo "          half 16: 12 + 4 skipped (std-only *_io_vs_std; *_constexpr_path_* until B4b-SYCL)"
+echo "          half 16: 14 + 2 skipped (the std-only *_io_vs_std)"
 echo "logs: $LOG_DIR (job output: $LOG_DIR/job.out)"
 exit $status

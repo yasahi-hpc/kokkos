@@ -9,11 +9,11 @@
 // The distinguished values of half_t and bhalf_t (infinity, finite_min/max,
 // epsilon, round_error, norm_min, denorm_min, quiet/signaling NaN), given as
 // bit patterns (B4c). Where half values are constexpr (the std backend, B4a;
-// CUDA, B4b-CUDA) they are constexpr half_t/bhalf_t, like the traits of
-// float and double: usable in constant expressions, converted to double
-// directly, without the copy-initialization warning of GCC's bf16 check. On HIP
-// and SYCL they stay bit patterns (BitComparisonWrapper), which convert to the
-// half type and compare with it at run time.
+// CUDA, B4b-CUDA; SYCL, B4b-SYCL) they are constexpr half_t/bhalf_t, like the
+// traits of float and double: usable in constant expressions, converted to
+// double directly, without the copy-initialization warning of GCC's bf16
+// check. On HIP they stay bit patterns (BitComparisonWrapper), which convert to
+// the half type and compare with it at run time.
 #ifdef KOKKOS_IMPL_HALF_IS_CONSTEXPR
 #define KOKKOS_IMPL_HALF_TRAIT_VALUE(HALF, BITS) \
   static constexpr HALF value {                  \
