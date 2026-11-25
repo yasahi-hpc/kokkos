@@ -14,7 +14,25 @@ and §8.5 were written before Aurora was available and say "an Intel GPU with FP
 
 ## Done
 
-Nothing on the SYCL backend has run yet. Done so far, on this machine:
+Part 1 is done: **Aurora job 9127366** (2026-11-25, `efa57b218`, icpx 2026.1, Intel Data
+Center GPU Max 1550, Debug, `-fp-model=precise`). All builds succeed; the half macros are as
+expected (`NATIVE_HALF=1`, `NATIVE_BHALF=1`, `HALF_IS_CONSTEXPR=0`,
+`HALF_T_IS_FLOAT=false`, `BHALF_T_IS_FLOAT=false`); the only warnings are Intel's 10,715
+"generic address space" messages.
+
+| Filter | Serial | SYCL |
+|---|---|---|
+| `*complex*:*atomic*` | 27 pass | 27 pass |
+| `*numeric_traits*` | 14 pass, 1 skip | 14 pass, 1 skip |
+| `*half*` (`Default`) | — | 12 pass, 4 skip (the two std-only `*_io_vs_std`, the two `*_constexpr_path_*` until B4b-SYCL) |
+
+It took four runs. They found and fixed, in Kokkos: H17 on SYCL (the `bool` casts), DPC++'s
+host `sycl::half(float)` rounding (Kokkos rounds in software on the SYCL host), and the Intel
+GPU's signed zeros of `sin` and `atan2`. In the tests: the special-value reference (now glibc's
+fixed table, as the CUDA and std backends) and finite-math guards. In the job script:
+`-fp-model=precise` and the probe. Details in the run sections below.
+
+Done before, on this machine:
 
 | What | How |
 |---|---|
@@ -67,7 +85,9 @@ through `::Kokkos::Impl::sycl_math`. The SYCL half headers could not be checked 
 (they need the SYCL backend's configuration); they compile for the first time with the
 fourth run.
 
-## Open: validate the committed work on SYCL
+## Open
+
+The job script and what it checks (part 1, done above):
 
 No code changes; one Aurora job:
 
