@@ -188,9 +188,10 @@ they round down for k > 24.
 `warning #`.
 
 **Next:** rerun `qsub run_sycl_aurora.sh`. Expected: `*half*` 14 pass, 2 skip, and
-everything else as before. Optional on the A100 (`sub_half_A100.sh`): the new tie-adjacent
-integers against CUDA's `__ll2bfloat16_rn`/`__int2bfloat16_rn`, and the changed
-compound assignments.
+everything else as before. On the A100: `pjsub sub_bf16fix_A100.sh` runs the new
+tie-adjacent integers against CUDA's `__ll2bfloat16_rn`/`__int2bfloat16_rn`, the changed
+compound assignments, and the pre-Ampere bf16 branch. That branch also converted through
+float; it now uses the same intrinsics (`cuda-tests.md`).
 
 ### Part 1, the job script and what it checks (done above)
 

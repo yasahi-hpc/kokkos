@@ -52,7 +52,7 @@ branch: ctest recorded `***Exception: SegFault` on 2026-10-22, 10-26 and 10-27
 | Task | Why not now |
 |---|---|
 | **CH6:** paired `__half2` arithmetic (future work, decided 2026-11-24) | only if a benchmark of instruction-bound code (not memory-bound) shows a gain |
-| **Pre-Ampere bf16 double rounding:** before sm_80, `double` and 64-bit integers convert to `bfloat16` through `float`, rounding twice (`Kokkos_Cuda_Half_Conversion.hpp`) | known gap, unfixed; needs an NVIDIA GPU older than sm_80, which none of the available machines has |
+| ~~**Pre-Ampere bf16 double rounding:** before sm_80, `double` and 64-bit integers convert to `bfloat16` through `float`, rounding twice (`Kokkos_Cuda_Half_Conversion.hpp`)~~ | fixed 2026-11-25 (found with the SYCL double-rounding fix): the pre-Ampere branch now uses `__double2bfloat16` and the `_rn` integer intrinsics, which round once on every architecture in CUDA ≥ 12.2. Compile-checked for sm_70. To run: `pjsub sub_bf16fix_A100.sh`, whose `v_sm70` is built for sm_70; the A100 JIT-compiles its PTX, so the pre-Ampere code runs. Expected line: `1 4e81 4e81 3f81 1` |
 | **C++23 with nvcc** (CUDA ≥ 13.3, per Kokkos 5.2.0) | CUDA 12.6 here. With the CUDA backend `half_t` stays `__half`, so this is mainly a compile check |
 
 Not CUDA, so listed elsewhere: HIP and SYCL validation, and B4b on HIP and SYCL

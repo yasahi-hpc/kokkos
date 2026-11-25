@@ -197,8 +197,9 @@ KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
 cast_to_bhalf(double val) {
   if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
     return Impl::half_constexpr_from<bhalf_t>(val);
-  // double2bfloat16 was only introduced in CUDA 11 too
-  return bhalf_t(__float2bfloat16(static_cast<float>(val)));
+  // Round once (through float would round twice); Kokkos requires CUDA 12,
+  // where the conversions below exist for every architecture.
+  return __double2bfloat16(val);
 }
 
 KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
@@ -219,28 +220,28 @@ KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
 cast_to_bhalf(int val) {
   if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
     return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t(__float2bfloat16(static_cast<float>(val)));
+  return __int2bfloat16_rn(val);
 }
 
 KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
 cast_to_bhalf(unsigned int val) {
   if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
     return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t(__float2bfloat16(static_cast<float>(val)));
+  return __uint2bfloat16_rn(val);
 }
 
 KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
 cast_to_bhalf(long long val) {
   if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
     return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t(__float2bfloat16(static_cast<float>(val)));
+  return __ll2bfloat16_rn(val);
 }
 
 KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
 cast_to_bhalf(unsigned long long val) {
   if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
     return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t(__float2bfloat16(static_cast<float>(val)));
+  return __ull2bfloat16_rn(val);
 }
 
 KOKKOS_INLINE_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
