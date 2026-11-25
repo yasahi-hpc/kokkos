@@ -24,6 +24,9 @@
 #   BUILD_DIR    build directory       (default: $KOKKOS_SRC/build_sycl_pvc[_<type>])
 #   BUILD_TYPE   CMake build type      (default: Debug; other types get a suffix)
 #   ARCH         Kokkos_ARCH_<ARCH>    (default: INTEL_PVC)
+#   CXX_FLAGS    CMAKE_CXX_FLAGS       (default: -fp-model=precise, as Kokkos's CI uses
+#                with icpx: its default -fp-model=fast does not honour NaN,
+#                infinity or the sign of zero, which the complex tests check)
 #   JOBS         build parallelism     (default: number of CPUs)
 #   FULL         ON: also build and run every core test executable, without a
 #                filter (needs more time: qsub -l walltime=6:00:00 -v FULL=ON ...)
@@ -37,6 +40,7 @@ BUILD_TYPE=${BUILD_TYPE:-Debug}
 BUILD_DIR=${BUILD_DIR:-$KOKKOS_SRC/build_sycl_pvc$([ "$BUILD_TYPE" != Debug ] && echo "_${BUILD_TYPE,,}")}
 ARCH=${ARCH:-INTEL_PVC}
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 8)}
+CXX_FLAGS=${CXX_FLAGS--fp-model=precise}
 FULL=${FULL:-OFF}
 JOBID=${PBS_JOBID:-local.$(date +%Y%m%d-%H%M%S)}
 LOG_DIR=$KOKKOS_SRC/sycl_logs.${JOBID%%.*}
@@ -63,7 +67,7 @@ echo "host:     $(hostname)"
 echo "source:   $KOKKOS_SRC ($(git -C "$KOKKOS_SRC" rev-parse --short HEAD 2>/dev/null) on $(git -C "$KOKKOS_SRC" branch --show-current 2>/dev/null))"
 echo "compiler: $CXX: $("$CXX" --version | head -1)"
 echo "cmake:    $(cmake --version | head -1)"
-echo "build:    $BUILD_DIR ($BUILD_TYPE, Kokkos_ARCH_$ARCH)"
+echo "build:    $BUILD_DIR ($BUILD_TYPE, Kokkos_ARCH_$ARCH, CMAKE_CXX_FLAGS=$CXX_FLAGS)"
 echo "logs:     $LOG_DIR"
 echo "===== SYCL devices"
 (sycl-ls 2>&1 || echo "sycl-ls not available") | head -20
@@ -76,6 +80,7 @@ cmake -S "$KOKKOS_SRC" -B "$BUILD_DIR" \
   -DKokkos_ENABLE_SERIAL=ON \
   -DKokkos_ARCH_"$ARCH"=ON \
   -DKokkos_ENABLE_TESTS=ON \
+  -DCMAKE_CXX_FLAGS="$CXX_FLAGS" \
   > "$LOG_DIR/configure.log" 2>&1
 rc=$?
 if [ $rc != 0 ]; then
@@ -115,8 +120,13 @@ PROBE_HALF_FULL_TYPE=0
 PROBE_HALF_T_IS_FLOAT=KOKKOS_HALF_T_IS_FLOAT
 PROBE_BHALF_T_IS_FLOAT=KOKKOS_BHALF_T_IS_FLOAT
 EOF
+  # icpx -fsycl -E fails (several passes); preprocess the device pass only.
   # shellcheck disable=SC2086
-  (cd "$BUILD_DIR" && "$CXX" $FLAGS -E -P "$LOG_DIR/half_probe.cpp" 2>&1 | grep '^PROBE_' | sed 's/^PROBE_/  /')
+  (cd "$BUILD_DIR" && "$CXX" $FLAGS -fsycl-device-only -E -P "$LOG_DIR/half_probe.cpp" \
+    > "$LOG_DIR/half_probe.out" 2>&1)
+  grep '^PROBE_' "$LOG_DIR/half_probe.out" | sed 's/^PROBE_/  /'
+  grep -q '^PROBE_' "$LOG_DIR/half_probe.out" ||
+    { echo "  probe failed:"; grep -m5 error "$LOG_DIR/half_probe.out"; }
   echo "  (expected: NATIVE_HALF=1, NATIVE_BHALF=1, HALF_IS_CONSTEXPR=0, HALF_T_IS_FLOAT=false, BHALF_T_IS_FLOAT=false)"
 fi
 

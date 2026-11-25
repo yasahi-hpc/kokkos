@@ -1028,6 +1028,10 @@ struct TestComplexDivision {
 };
 
 TEST(TEST_CATEGORY, complex_division) {
+#if __FINITE_MATH_ONLY__
+  GTEST_SKIP() << "needs infinities, NaNs and signed zeros, which "
+                  "-ffinite-math-only does not provide";
+#endif
   TestComplexDivision<float, TEST_EXECSPACE>().testit();
   TestComplexDivision<double, TEST_EXECSPACE>().testit();
 }
@@ -1125,6 +1129,10 @@ struct TestComplexMultiplication {
 };
 
 TEST(TEST_CATEGORY, complex_multiplication) {
+#if __FINITE_MATH_ONLY__
+  GTEST_SKIP() << "needs infinities, NaNs and signed zeros, which "
+                  "-ffinite-math-only does not provide";
+#endif
   TestComplexMultiplication<float, TEST_EXECSPACE>().testit();
   TestComplexMultiplication<double, TEST_EXECSPACE>().testit();
 }
@@ -1305,6 +1313,10 @@ struct TestComplexArgProj {
 };
 
 TEST(TEST_CATEGORY, complex_arg_proj) {
+#if __FINITE_MATH_ONLY__
+  GTEST_SKIP() << "needs infinities, NaNs and signed zeros, which "
+                  "-ffinite-math-only does not provide";
+#endif
   TestComplexArgProj<float, TEST_EXECSPACE>().testit();
   TestComplexArgProj<double, TEST_EXECSPACE>().testit();
 }
@@ -1407,6 +1419,10 @@ struct TestComplexElementarySpecialValues {
 };
 
 TEST(TEST_CATEGORY, complex_exp_sqrt_log_special_values) {
+#if __FINITE_MATH_ONLY__
+  GTEST_SKIP() << "needs infinities, NaNs and signed zeros, which "
+                  "-ffinite-math-only does not provide";
+#endif
   TestComplexElementarySpecialValues<float, TEST_EXECSPACE>().testit();
   TestComplexElementarySpecialValues<double, TEST_EXECSPACE>().testit();
 }
@@ -1497,6 +1513,10 @@ struct TestComplexHyperbolicSpecialValues {
 };
 
 TEST(TEST_CATEGORY, complex_hyperbolic_special_values) {
+#if __FINITE_MATH_ONLY__
+  GTEST_SKIP() << "needs infinities, NaNs and signed zeros, which "
+                  "-ffinite-math-only does not provide";
+#endif
   TestComplexHyperbolicSpecialValues<float, TEST_EXECSPACE>().testit();
   TestComplexHyperbolicSpecialValues<double, TEST_EXECSPACE>().testit();
 }
@@ -1549,6 +1569,10 @@ struct TestComplexTanhLarge {
 };
 
 TEST(TEST_CATEGORY, complex_tanh_large_argument) {
+#if __FINITE_MATH_ONLY__
+  GTEST_SKIP() << "needs infinities, NaNs and signed zeros, which "
+                  "-ffinite-math-only does not provide";
+#endif
   TestComplexTanhLarge<float, TEST_EXECSPACE>().testit();
   TestComplexTanhLarge<double, TEST_EXECSPACE>().testit();
 }
@@ -1681,6 +1705,10 @@ struct TestComplexInverseSpecialValues {
 };
 
 TEST(TEST_CATEGORY, complex_inverse_special_values) {
+#if __FINITE_MATH_ONLY__
+  GTEST_SKIP() << "needs infinities, NaNs and signed zeros, which "
+                  "-ffinite-math-only does not provide";
+#endif
   TestComplexInverseSpecialValues<float, TEST_EXECSPACE>().testit();
   TestComplexInverseSpecialValues<double, TEST_EXECSPACE>().testit();
 }
@@ -2528,6 +2556,7 @@ void test_complex_half_compute_in_float() {
   // a c + b d = 120000 overflows half_t, the quotient does not.
   EXPECT_EQ(CH(H(60000.f), H(60000.f)) / CH(H(1.f), H(1.f)),
             CH(H(60000.f), H(0.f)));
+#if !__FINITE_MATH_ONLY__
   // Special values (C99 Annex G) are kept.
   const H inf = H(Kokkos::Experimental::infinity_v<float>);
   EXPECT_EQ(CH(H(1.f), H(1.f)) / CH(H(0.f), H(0.f)), CH(inf, inf));
@@ -2537,6 +2566,7 @@ void test_complex_half_compute_in_float() {
       CH(inf, H(Kokkos::Experimental::quiet_NaN_v<float>)) * CH(H(1.f), H(0.f));
   EXPECT_EQ(m.real(), inf);
   EXPECT_TRUE(Kokkos::isnan(static_cast<float>(m.imag())));
+#endif
   // asin of a large argument: no spurious overflow in the squares.
   const CH a = Kokkos::asin(CH(H(16384.f), H(16384.f)));
   EXPECT_TRUE(Kokkos::isfinite(static_cast<float>(a.real())) &&

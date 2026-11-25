@@ -86,10 +86,15 @@ void test_bhalf_conversion() {
 // bhalf_t equivalents to be defined for the backend.
 template <class H>
 void test_half_bool_conversion(float denorm_min) {
-  constexpr int n        = 8;
-  const float values[n]  = {0.f,   -0.f,       0.5f,     -2.f,
+  // The last two values (infinity, NaN) only without -ffinite-math-only.
+#if __FINITE_MATH_ONLY__
+  constexpr int n = 6;
+#else
+  constexpr int n = 8;
+#endif
+  const float values[8]  = {0.f,   -0.f,       0.5f,     -2.f,
                             1e-3f, denorm_min, INFINITY, NAN};
-  const bool expected[n] = {false, false, true, true, true, true, true, true};
+  const bool expected[8] = {false, false, true, true, true, true, true, true};
   using MemorySpace      = typename TEST_EXECSPACE::memory_space;
   Kokkos::View<H[n], MemorySpace> in("in");
   Kokkos::View<bool[n], MemorySpace> to_bool("to_bool");

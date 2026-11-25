@@ -21,6 +21,23 @@ Nothing on the SYCL backend has run yet. Done so far, on this machine:
 | The premise of B4b-SYCL, compile-time only | `tmp/claude_builds/complex_a6/b4sycl.cpp`, `icpx -fsycl -fsyntax-only` (DPC++ 2024.0), host and `-fsycl-device-only` passes. `constexpr sycl::half(1.5f) + sycl::half(2.5f) == 4` holds, so `sycl::half` is natively `constexpr`. `constexpr bfloat16(1.5f)` fails: bfloat16 is not. `__builtin_bit_cast` to and from both types is a constant expression |
 | The half code paths no longer use `double` on the device (CH3) | by construction: the half `<numbers>` constants are instantiated only in discarded branches |
 
+### First run: job 9126968 (2026-11-25, `715baddcc`)
+
+Aurora, icpx 2026.1.0, Intel Data Center GPU Max 1550, Debug, default compiler flags.
+
+| Result | Cause | Fix |
+|---|---|---|
+| `*numeric_traits*`: 14 pass on `Serial1` and `SYCL1B` (1 std-only skip) | — | — |
+| `Default` (the half tests) did not build: "SYCL kernel cannot call an undefined function without SYCL_EXTERNAL attribute", at the bool and cast-overload tests | **H17 on SYCL**: the wrapper header declares `cast_to_half(bool)`, `cast_from_half<bool>`, `cast_to_bhalf(bool)` and `cast_from_bhalf<bool>`, but `Kokkos_SYCL_Half_Conversion.hpp` never defined them (as CUDA before H17). Pre-existing; caught by `half_bool_conversion` and `*_cast_overloads` | the four casts defined, through float as on CUDA (2026-11-25) |
+| `*complex*:*atomic*`: 4 failures on Serial, 5 on SYCL, all with infinities, NaNs or a signed zero (`(inf,nan) * (1,0)`, `arg(inf,-1)` gave `+0`) | icpx's default `-fp-model=fast` does not honour them; Kokkos's CI builds with `-fp-model=precise` whenever it uses icpx | `run_sycl_aurora.sh` passes `-fp-model=precise` (setting `CXX_FLAGS`) |
+| The half-macro probe printed nothing | `icpx -fsycl -E` fails (several passes) | the probe preprocesses with `-fsycl-device-only` and keeps its output |
+| About 4,500 "additional control flow due to presence of generic address space operations" warnings per SYCL test target | Intel's GPU backend, not this work | — |
+
+Found with it: one Kokkos CI job builds with clang and `-ffinite-math-only`, and Kokkos's math
+tests guard their NaN/infinity checks with `#if !__FINITE_MATH_ONLY__`. The branch's complex
+special-value tests had no such guard. They have it now (`complex_half.md` §8.2). It does not
+change the icpx run: icpx's fast model leaves `__FINITE_MATH_ONLY__` at 0.
+
 ## Open: validate the committed work on SYCL
 
 No code changes; one Aurora job:
@@ -32,7 +49,8 @@ qsub run_sycl_aurora.sh
 `run_sycl_aurora.sh` (PBS, `capacity` queue, 2 hours, `-A kokkos_math`):
 - loads cmake, uses `icpx`, prints `sycl-ls`;
 - configures `-DKokkos_ENABLE_SYCL=ON -DKokkos_ENABLE_SERIAL=ON
-  -DKokkos_ARCH_INTEL_PVC=ON`, tests on, Debug by default (`BUILD_TYPE`), in
+  -DKokkos_ARCH_INTEL_PVC=ON`, tests on, Debug by default (`BUILD_TYPE`), with
+  `CMAKE_CXX_FLAGS=-fp-model=precise` (as Kokkos's CI; setting `CXX_FLAGS`), in
   `build_sycl_pvc`;
 - prints the half macros as the tests see them (`KOKKOS_HAS_NATIVE_HALF_TYPE`,
   `..._BHALF_...`, `KOKKOS_IMPL_HALF_IS_CONSTEXPR`, `*_T_IS_FLOAT`);

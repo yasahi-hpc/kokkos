@@ -140,7 +140,14 @@ void test_half_io_input() {
     const char *input;
     float expected;
   } errors[] = {{"x", 0.f}, {"", 7.f}, {"1e999", max}, {"-1e999", -max}};
-  for (const auto &e : errors) {
+  // "+-1e999" read as +-infinity: only without -ffinite-math-only.
+#if __FINITE_MATH_ONLY__
+  constexpr int n_errors = 2;
+#else
+  constexpr int n_errors = 4;
+#endif
+  for (int k = 0; k < n_errors; ++k) {
+    const auto &e = errors[k];
     SCOPED_TRACE(e.input);
     std::istringstream is(e.input);
     H h(7.f);
