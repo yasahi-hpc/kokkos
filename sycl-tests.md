@@ -52,6 +52,21 @@ change the icpx run: icpx's fast model leaves `__FINITE_MATH_ONLY__` at 0.
 | `half_io`: 1974 values do not survive the text round trip | DPC++'s host `sycl::half(float)` rounds wrongly below 2^-13: it truncates, and ties do not go to even (measured with oneAPI 2024.0: about 2,050 neighbours and 1024 ties wrong, in the subnormals and the smallest normal binade). An upstream bug, worth reporting to Intel | on the SYCL host, `cast_to_half`/`cast_to_bhalf` from `float`/`double` round with Kokkos's software conversion (`Impl::half_constexpr_from`), and the wrapper's operators compute in float (`KOKKOS_IMPL_HALF_SOFTWARE_PATH()`, true in the SYCL host pass); the device keeps the hardware conversions |
 | The half-macro probe failed again | a compile definition holds a quoted string with spaces, which the unquoted expansion split | the flags are expanded with `eval` |
 
+### Third run: job 9127338 (2026-11-25, `b2dfe3313`)
+
+The half-macro probe works now: `NATIVE_HALF=1`, `NATIVE_BHALF=1`, `HALF_IS_CONSTEXPR=0`,
+`HALF_FULL_TYPE=1`, `HALF_T_IS_FLOAT=false`, `BHALF_T_IS_FLOAT=false`, as expected.
+Every build failed in `kokkoscore`: the `sycl_math` namespace was declared as
+`namespace Kokkos::Impl::sycl_math` at a place already inside `namespace Kokkos`, so it
+became `Kokkos::Kokkos::Impl::sycl_math`, and that inner `Kokkos` also hid
+`Kokkos::Impl::promote_2_t` (my error; the local check had put the namespace at global
+scope). Fixed: `namespace Impl::sycl_math` inside `namespace Kokkos`. Checked with the
+local icpx 2024.0: the real `Kokkos_MathematicalFunctions.hpp` compiles for SYCL host and
+device (`-DKOKKOS_ENABLE_SYCL`, `-fsyntax-only`), and every SYCL math function goes
+through `::Kokkos::Impl::sycl_math`. The SYCL half headers could not be checked locally
+(they need the SYCL backend's configuration); they compile for the first time with the
+fourth run.
+
 ## Open: validate the committed work on SYCL
 
 No code changes; one Aurora job:

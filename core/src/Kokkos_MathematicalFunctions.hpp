@@ -84,7 +84,7 @@ using promote_3_t = typename promote_3<T, U, V>::type;
 // +-0 or +-pi). The complex functions rely on these signs (C99 Annex G), and
 // match the CUDA and std backends with them. A qualified name of this
 // namespace finds sin and atan2 here and every other function in sycl.
-namespace Kokkos::Impl::sycl_math {
+namespace Impl::sycl_math {  // inside namespace Kokkos
 using namespace ::sycl;
 inline float sin(float x) { return x == 0 ? x : ::sycl::sin(x); }
 inline double sin(double x) { return x == 0 ? x : ::sycl::sin(x); }
@@ -94,7 +94,7 @@ inline float atan2(float y, float x) {
 inline double atan2(double y, double x) {
   return ::sycl::copysign(::sycl::atan2(y, x), y);
 }
-}  // namespace Kokkos::Impl::sycl_math
+}  // namespace Impl::sycl_math
 #define KOKKOS_IMPL_MATH_FUNCTIONS_NAMESPACE ::Kokkos::Impl::sycl_math
 #else
 #define KOKKOS_IMPL_MATH_FUNCTIONS_NAMESPACE std
