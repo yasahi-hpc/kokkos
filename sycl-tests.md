@@ -116,6 +116,39 @@ If a `*_constexpr_path_*` test fails on the device, the GPU's conversion disagre
 round-to-nearest-even somewhere (the log counts the mismatches); compare with the host
 rounding bug, which was the same kind of finding.
 
+**Fourth run: job 9127527** (2026-11-25, `f3034cc14`, B4b-SYCL). The probe shows
+`HALF_IS_CONSTEXPR=1`; every build succeeds (only Intel's "generic address space"
+warnings), so the B4a, CH5 and B4c `static_assert`s hold in both passes on icpx 2026.1.
+`*complex*:*atomic*` 27 on Serial and SYCL, `*numeric_traits*` 14 + 1 skip, as expected.
+`*half*`: 12 pass, 2 skip, **2 fail**: `half_constexpr_path_matches_runtime` and
+`bhalf_...`, on the device only (the host part passed):
+
+| Type | Device mismatches | Non-NaN patterns |
+|---|---|---|
+| `half_t` | 63486 | 63490 (65536 − 2·1023) |
+| `bhalf_t` | 65278 | 65282 (65536 − 2·127) |
+
+So exactly one comparison fails for every non-NaN pattern but four, probably ±0 and
+±inf, which the software paths treat as special cases. The midpoint and integer
+comparisons, 3 or 2 per pattern, all agree. The failure is therefore in decoding
+(`half_constexpr_to<float>(h)` vs the GPU's `float(h)`) or encoding
+(`half_constexpr_from(float(h))` vs the pattern). The test reported only a total, so it
+can't say which.
+- **Device code checked here** (icpx 2024.0, `-fsycl-device-only`, SPIR-V text): at run
+  time `float(h)` and `half_t(f)` are a single `FConvert`, with no trace of the software
+  path, and `half_constexpr_from`/`_to` are integer bit operations. So
+  `__builtin_is_constant_evaluated()` selects as intended. Compile-time results are
+  unaffected: the `static_assert`s held.
+- **Test change:** `*_constexpr_path_matches_runtime` now counts the four kinds
+  separately (decode, encode, midpoints, 64-bit integers), on the host and the device. For
+  the first failing pattern of each kind it reports the software bits, the run-time bits
+  and the input. A planted decode error with the shim shows it working; CUDA still
+  compiles with 0 `warning #`.
+
+**Next:** rerun `qsub run_sycl_aurora.sh` (the same filters). The `*half*` log then names
+the failing kind and the first pattern's bits, from which the fix follows: a device
+conversion that differs from round to nearest even, or a miscompiled software path.
+
 ### Part 1, the job script and what it checks (done above)
 
 One Aurora job:

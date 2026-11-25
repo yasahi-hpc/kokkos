@@ -387,36 +387,60 @@ static_assert(half_constexpr_checks<Kokkos::Experimental::bhalf_t>());
 // twice), and 64-bit integers. NaNs are not compared (their bits are not
 // specified).
 #if defined(KOKKOS_IMPL_HALF_IS_CONSTEXPR)
+// The checks, by kind: 0 decode (half_constexpr_to<float> vs float(h)),
+// 1 encode (half_constexpr_from(float(h)) vs the pattern), 2 the midpoints and
+// their neighbours (vs H(double)), 3 the 64-bit integers (vs H(long long)).
+// detail, if given, receives the operands of the first failure of the kind
+// (or of the first comparison, if none fails): {software bits, run-time bits,
+// the input's bits (low, high 32)}.
 template <class H>
-KOKKOS_FUNCTION int check_half_constexpr_path(std::uint32_t i) {
+KOKKOS_FUNCTION int check_half_constexpr_path(std::uint32_t i, int kind,
+                                              std::uint32_t *detail = nullptr) {
   namespace KEI = Kokkos::Experimental::Impl;
   int err       = 0;
+  bool first    = true;
+  auto fail     = [&](std::uint32_t sw, std::uint32_t rt, std::uint64_t in) {
+    if (detail && (first || (sw != rt && err == 0))) {
+      detail[0] = sw;
+      detail[1] = rt;
+      detail[2] = static_cast<std::uint32_t>(in);
+      detail[3] = static_cast<std::uint32_t>(in >> 32);
+    }
+    first = false;
+    err += sw != rt;
+  };
   const auto u  = static_cast<std::uint16_t>(i);
   const H h     = Kokkos::bit_cast<H>(u);
   const float f = static_cast<float>(h);
   if (f != f) return 0;
-  err += Kokkos::bit_cast<std::uint32_t>(KEI::half_constexpr_to<float>(h)) !=
-         Kokkos::bit_cast<std::uint32_t>(f);
-  err += Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(f)) != u;
+  const auto fb = Kokkos::bit_cast<std::uint32_t>(f);
+  if (kind == 0)
+    fail(Kokkos::bit_cast<std::uint32_t>(KEI::half_constexpr_to<float>(h)), fb,
+         u);
+  if (kind == 1)
+    fail(Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(f)), u,
+         fb);
   const auto u1   = static_cast<std::uint16_t>(u + 1);
   const float f1  = static_cast<float>(Kokkos::bit_cast<H>(u1));
   const bool both = (u & 0x7fff) != 0x7fff && Kokkos::isfinite(f) &&
                     Kokkos::isfinite(f1) && ((u ^ u1) & 0x8000) == 0;
-  if (both) {
+  if (kind == 2 && both) {
     const double mid = (static_cast<double>(f) + static_cast<double>(f1)) / 2;
     const auto mb    = Kokkos::bit_cast<std::uint64_t>(mid);
     for (double d : {mid, Kokkos::bit_cast<double>(mb - 1),
                      Kokkos::bit_cast<double>(mb + 1)}) {
-      err += Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(d)) !=
-             Kokkos::bit_cast<std::uint16_t>(H(d));
+      fail(Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(d)),
+           Kokkos::bit_cast<std::uint16_t>(H(d)),
+           Kokkos::bit_cast<std::uint64_t>(d));
     }
   }
-  if (i < 64) {  // 64-bit integers around 2^i, with low bits set
+  if (kind == 3 && i < 64) {  // 64-bit integers around 2^i, low bits set
     const long long v =
         static_cast<long long>((1ull << (i % 63)) | (1ull << (i % 63) / 2) | 1);
     for (long long w : {v, -v}) {
-      err += Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(w)) !=
-             Kokkos::bit_cast<std::uint16_t>(H(w));
+      fail(Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(w)),
+           Kokkos::bit_cast<std::uint16_t>(H(w)),
+           static_cast<std::uint64_t>(w));
     }
   }
   return err;
@@ -424,18 +448,49 @@ KOKKOS_FUNCTION int check_half_constexpr_path(std::uint32_t i) {
 
 template <class H>
 void test_half_constexpr_path() {
-  int host = 0;
-  for (std::uint32_t i = 0; i < 65536; ++i)
-    host += check_half_constexpr_path<H>(i);
-  EXPECT_EQ(host, 0);
-  int device = 0;
-  Kokkos::parallel_reduce(
-      "TestHalfConstexprPath", Kokkos::RangePolicy<TEST_EXECSPACE>(0, 65536),
-      KOKKOS_LAMBDA(int i, int &err) {
-        err += check_half_constexpr_path<H>(static_cast<std::uint32_t>(i));
-      },
-      device);
-  EXPECT_EQ(device, 0);
+  const char *kinds[] = {"decode", "encode", "midpoints", "64-bit integers"};
+  for (int kind = 0; kind < 4; ++kind) {
+    int host = 0;
+    for (std::uint32_t i = 0; i < 65536; ++i)
+      host += check_half_constexpr_path<H>(i, kind);
+    EXPECT_EQ(host, 0) << "host, " << kinds[kind];
+    int device = 0;
+    Kokkos::parallel_reduce(
+        "TestHalfConstexprPath", Kokkos::RangePolicy<TEST_EXECSPACE>(0, 65536),
+        KOKKOS_LAMBDA(int i, int &err) {
+          err +=
+              check_half_constexpr_path<H>(static_cast<std::uint32_t>(i), kind);
+        },
+        device);
+    EXPECT_EQ(device, 0) << "device, " << kinds[kind];
+    if (device == 0) continue;
+    // The first failing pattern on the device, with the operands.
+    int first = 65536;
+    Kokkos::parallel_reduce(
+        "TestHalfConstexprPathFirst",
+        Kokkos::RangePolicy<TEST_EXECSPACE>(0, 65536),
+        KOKKOS_LAMBDA(int i, int &m) {
+          if (i < m &&
+              check_half_constexpr_path<H>(static_cast<std::uint32_t>(i), kind))
+            m = i;
+        },
+        Kokkos::Min<int>(first));
+    Kokkos::View<std::uint32_t[4], TEST_EXECSPACE> d("detail");
+    Kokkos::parallel_for(
+        "TestHalfConstexprPathDetail",
+        Kokkos::RangePolicy<TEST_EXECSPACE>(0, 1), KOKKOS_LAMBDA(int) {
+          check_half_constexpr_path<H>(static_cast<std::uint32_t>(first), kind,
+                                       d.data());
+        });
+    auto hd = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d);
+    std::uint32_t hh[4] = {};
+    check_half_constexpr_path<H>(static_cast<std::uint32_t>(first), kind, hh);
+    ADD_FAILURE() << std::hex << "device, " << kinds[kind]
+                  << ": first failing pattern 0x" << first << ": software 0x"
+                  << hd(0) << ", run time 0x" << hd(1) << ", input 0x" << hd(3)
+                  << "'" << hd(2) << " (host: software 0x" << hh[0]
+                  << ", run time 0x" << hh[1] << ")";
+  }
 }
 #endif
 
