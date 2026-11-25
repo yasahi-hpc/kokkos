@@ -30,6 +30,7 @@
 #   JOBS         build parallelism     (default: number of CPUs)
 #   FULL         ON: also build and run every core test executable, without a
 #                filter (needs more time: qsub -l walltime=6:00:00 -v FULL=ON ...)
+#   RUN_TIMEOUT  seconds per test run before it is killed (default: 3600)
 # Output: also saved as sycl_logs.<job id>/job.out, with the build and test logs.
 
 cd "${PBS_O_WORKDIR:-$PWD}" || exit 2
@@ -42,11 +43,16 @@ ARCH=${ARCH:-INTEL_PVC}
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 8)}
 CXX_FLAGS=${CXX_FLAGS--fp-model=precise}
 FULL=${FULL:-OFF}
+RUN_TIMEOUT=${RUN_TIMEOUT:-3600}
 JOBID=${PBS_JOBID:-local.$(date +%Y%m%d-%H%M%S)}
 LOG_DIR=$KOKKOS_SRC/sycl_logs.${JOBID%%.*}
 
 declare -a STEP_NAMES STEP_RESULTS
-record() { STEP_NAMES+=("$1"); STEP_RESULTS+=("$2"); }
+# Each result also goes to steps.txt at once, so a job that is killed keeps them.
+record() {
+  STEP_NAMES+=("$1"); STEP_RESULTS+=("$2")
+  printf '  %-58s %s\n' "$1" "$2" >> "$LOG_DIR/steps.txt"
+}
 die() { echo "ERROR: $*" >&2; exit 2; }
 
 mkdir -p "$LOG_DIR" || die "cannot create $LOG_DIR"
@@ -159,12 +165,15 @@ run_test() {  # run_test <executable suffix> <filter>
   fi
   echo "===== Run $1 $2"
   local log="$LOG_DIR/run_$1_$(echo "$2" | tr -c 'A-Za-z0-9' _).log"
-  "$exe" ${2:+--gtest_filter="$2"} > "$log" 2>&1
+  # Line-buffered, so a crash keeps the output; killed after RUN_TIMEOUT.
+  echo "  start $(date +%T)"
+  timeout -k 60 "$RUN_TIMEOUT" stdbuf -oL -eL "$exe" ${2:+--gtest_filter="$2"} > "$log" 2>&1
   local trc=$?
+  echo "  end   $(date +%T), exit $trc$([ $trc = 124 ] && echo ' (timeout)')"
   grep -E '^\[ *(FAILED|PASSED) *\]|Failure|Expected|Which is|actual' "$log" | sort -u | head -30
   local nskip
   nskip=$(grep -cE '^\[ *SKIPPED *\] [^ ]+ \(' "$log")
-  record "$name" "$( [ $trc = 0 ] && grep -m1 'PASSED' "$log" | sed 's/.*PASSED *\] *//' || echo "FAILED (exit $trc, see $log)")$([ "$nskip" -gt 0 ] && echo " ($nskip skipped)")"
+  record "$name" "$( [ $trc = 0 ] && grep -m1 'PASSED' "$log" | sed 's/.*PASSED *\] *//' || echo "FAILED (exit $trc, last started: $(grep '^\[ RUN' "$log" | tail -1 | sed 's/.*\] *//'), see $log)")$([ "$nskip" -gt 0 ] && echo " ($nskip skipped)")"
 }
 run_test Serial_SmokeTest '*complex*:*atomic*'
 run_test SYCL_SmokeTest '*complex*:*atomic*'

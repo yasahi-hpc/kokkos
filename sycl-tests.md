@@ -265,10 +265,51 @@ Things to check that are specific to SYCL (§8.4):
 ### 2. Optional: the complete core test suite on SYCL
 
 As done for CUDA (`sub_full_A100.sh`) and the std backend (`FULL=ON`): every core test
-executable, without a filter, on Serial and SYCL: `qsub -l walltime=6:00:00 -v FULL=ON
-run_sycl_aurora.sh` (the walltime is a guess). Expect Kokkos's own skips; compare
-any failure with a run of the branch's base commit `a360acf37` before suspecting the
-branch.
+executable, without a filter, on Serial and SYCL.
+
+**First try: job 9127705** (2026-11-25, `6052d9385`, Debug, `FULL=ON`). The filtered runs
+pass as in job 9127657. The full run is incomplete:
+
+| Executable | Result |
+|---|---|
+| `Serial_SmokeTest` | 123 pass |
+| `Serial1` | 215 pass, **1 fail**: `mathematical_functions_signbit`, for `half_t` and `bhalf_t` |
+| `SYCL_SmokeTest` | fails `sycl_DeathTest.abort_from_device` (the device message is not the expected one) and `sycl.team_single_thread_int_ptr`, prints ~210,000 `TestTeamPolicy member(...) error` lines, then aborts in `TeamThreadMDRangeParallelFor` (core dump), without a gtest summary |
+| `SYCL1A` | **not built**: the Debug link fails, "relocation truncated to fit" (the binary is too large for the default code model) |
+| `SYCL1B` | its log stops in `sycl.memory_pool` without a summary, but was written for 37 minutes after `job.out` stopped |
+| `Default`, `Serial2`, `Serial_ViewSupport`, `SYCL2A`-`2D`, `SYCL3`, `SYCL_ViewSupport` | empty logs (`SYCL2A` segfaulted). The output was buffered and lost when the processes died |
+| Summary | empty: the job stopped right after printing the header. Probably killed; the PBS `.o`/`.e` files would say why |
+
+- **`signbit`: caused by the branch, fixed.** Since the host rounding fix (`b2dfe3313`) the
+  SYCL host computes half operations in float and converts back with
+  `Impl::half_constexpr_from`. That returned the canonical NaN `0x7fff`, so `-NaN` lost its
+  sign. Reproduced here with icpx 2024.0 on the host: `-quiet_NaN` gave `7fff`. Now a NaN
+  keeps its sign and the high bits of its payload, made quiet (IEEE 754): `-qNaN` is
+  `fe00`/`ffc0`, and `qNaN` round-trips as `7e00`/`7fc0`. NaN bits are not specified, and
+  `*_constexpr_path_*` does not compare NaNs, so CUDA (canonical `0x7fff` at run time) is
+  unaffected. The filtered runs could not see this: `signbit` is in `Serial1`'s
+  mathematical-function tests.
+- **The others are presumably not from the branch.** Team policies, device abort messages,
+  graphs and the memory pool don't involve half or complex. But they are unconfirmed
+  until a run of the base commit `a360acf37` shows the same.
+- **Script** (`run_sycl_aurora.sh`): each run is line-buffered (`stdbuf -oL`), so a crash
+  keeps the log. It has a timeout (`RUN_TIMEOUT`, default 1 hour) and prints its start and
+  end times. A failed run reports the last test it started. Each step's result goes to
+  `steps.txt` as it happens, so a killed job keeps its summary.
+
+**Next**, two jobs, which can run at the same time (separate build directories):
+
+```bash
+# the branch, Release (smaller binaries: SYCL1A should link)
+qsub -l walltime=6:00:00 -v FULL=ON,BUILD_TYPE=Release run_sycl_aurora.sh
+# the base commit, same settings, for comparison
+git worktree add ../kokkos-base a360acf37
+qsub -l walltime=6:00:00 -v FULL=ON,BUILD_TYPE=Release,KOKKOS_SRC=$PWD/../kokkos-base run_sycl_aurora.sh
+```
+
+The base checkout has none of the branch's tests, so only its failures matter: a failure in
+both runs is not the branch's. The SYCL math tests (`SYCL1A`, if it links) check the
+`sycl_math` wrappers (`sin`, `atan2` signed zeros) over all functions.
 
 ## Future work
 

@@ -1058,8 +1058,11 @@ class alignas(FloatType) floating_point_wrapper {
 // Software conversions for constant evaluation (B4b-CUDA): round to nearest
 // even, once, from the source value (converting a double or a 64-bit integer
 // through float would round twice); every half and bfloat16 value is exactly a
-// float. NaN results are the canonical NaN 0x7fff, as CUDA's conversions
-// return. Usable at run time too (the tests compare them with the hardware).
+// float. A NaN stays a NaN with its sign and the high bits of its payload,
+// made quiet, as IEEE 754 recommends (so -NaN stays negative: signbit; the
+// SYCL host uses these conversions at run time). CUDA's conversions return
+// the canonical 0x7fff instead; NaN bits are not specified. Usable at run time
+// too (the tests compare them with the hardware).
 namespace Impl {
 KOKKOS_INLINE_FUNCTION constexpr int half_bit_width(std::uint64_t x) {
   int n = 0;
@@ -1104,7 +1107,10 @@ KOKKOS_INLINE_FUNCTION constexpr std::uint16_t half_double_to_bits(double d) {
   const int be                = int((x >> 52) & 0x7ff);
   const std::uint64_t m       = x & ((std::uint64_t(1) << 52) - 1);
   constexpr std::uint16_t inf = std::uint16_t(((1 << EB) - 1) << MB);
-  if (be == 0x7ff) return m ? std::uint16_t(0x7fff) : std::uint16_t(s | inf);
+  if (be == 0x7ff && m) {  // NaN: quiet, with the sign and the high payload
+    return std::uint16_t(s | inf | (1u << (MB - 1)) | (m >> (52 - MB)));
+  }
+  if (be == 0x7ff) return std::uint16_t(s | inf);
   if (be == 0 && m == 0) return s;
   const std::uint64_t sig = be ? (m | (std::uint64_t(1) << 52)) : m;
   const int exp           = (be ? be : 1) - 1075;
