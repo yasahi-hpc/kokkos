@@ -33,4 +33,5 @@ for n in Serial Cuda; do
   ./Kokkos_CoreUnitTest_${n}_SmokeTest --gtest_filter='*complex*:*atomic*' || echo "EXIT $n $?"
 done
 echo "===== pre-Ampere bf16 branch (sm_70 PTX on the A100)"
-/home/i18048/claude_builds/complex/volta/v_sm70 || echo "EXIT v_sm70 $?"
+# (on /work: the compute nodes cannot see /home)
+/work/04/jh220036a/i18048/tmp/claude_builds/complex_a6/v_sm70 || echo "EXIT v_sm70 $?"

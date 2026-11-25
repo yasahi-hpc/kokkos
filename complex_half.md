@@ -1862,7 +1862,7 @@ awaits a decision.* Reconciled with the source:
   `__(u)int2bfloat16_rn`/`__(u)ll2bfloat16_rn`. Its comment said `__double2bfloat16`
   appeared only in CUDA 11; Kokkos requires nvcc ≥ 12.2, where all of these round once
   on every architecture (a sticky bit before the final rounding, `cuda_bf16.hpp`).
-  Checked with `-arch=sm_70` (`claude_builds/complex/volta/v.cu`); the run on the A100,
+  Checked with `-arch=sm_70` (`tmp/claude_builds/complex_a6/v.cu`, binary `v_sm70` there); the run on the A100,
   which JITs the compute_70 PTX, is in `sub_bf16fix_A100.sh`.
 - **`constexpr` is not CUDA-only (checked 2026-11-22).** Every backend can support it,
   but each needs a different mechanism, and each `impl_type` decides whether the
