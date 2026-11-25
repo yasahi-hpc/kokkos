@@ -14,12 +14,23 @@ namespace Kokkos::Experimental {
 /************************** half conversions **********************************/
 inline half_t cast_to_half(half_t val) { return val; }
 
-inline half_t cast_to_half(float val) { return half_t::impl_type(val); }
+// On the host, round with Kokkos's software conversion: DPC++'s host
+// sycl::half(float) rounds wrongly below 2^-13 (see
+// Kokkos_Half_FloatingPointWrapper.hpp). double rounds once from double.
+inline half_t cast_to_half(float val) {
+  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
+    return Impl::half_constexpr_from<half_t>(val);
+  return half_t::impl_type(val);
+}
 // false and true convert to 0 and 1 (exact), as for any floating-point type.
 inline half_t cast_to_half(bool val) {
   return cast_to_half(static_cast<float>(val));
 }
-inline half_t cast_to_half(double val) { return half_t::impl_type(val); }
+inline half_t cast_to_half(double val) {
+  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
+    return Impl::half_constexpr_from<half_t>(val);
+  return half_t::impl_type(val);
+}
 inline half_t cast_to_half(short val) { return half_t::impl_type(val); }
 inline half_t cast_to_half(unsigned short val) {
   return half_t::impl_type(val);
@@ -93,12 +104,20 @@ namespace Kokkos::Experimental {
 /************************** bhalf conversions *********************************/
 inline bhalf_t cast_to_bhalf(bhalf_t val) { return val; }
 
-inline bhalf_t cast_to_bhalf(float val) { return bhalf_t::impl_type(val); }
+inline bhalf_t cast_to_bhalf(float val) {
+  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
+    return Impl::half_constexpr_from<bhalf_t>(val);
+  return bhalf_t::impl_type(val);
+}
 // false and true convert to 0 and 1 (exact), as for any floating-point type.
 inline bhalf_t cast_to_bhalf(bool val) {
   return cast_to_bhalf(static_cast<float>(val));
 }
-inline bhalf_t cast_to_bhalf(double val) { return bhalf_t::impl_type(val); }
+inline bhalf_t cast_to_bhalf(double val) {
+  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
+    return Impl::half_constexpr_from<bhalf_t>(val);
+  return bhalf_t::impl_type(val);
+}
 inline bhalf_t cast_to_bhalf(short val) { return bhalf_t::impl_type(val); }
 inline bhalf_t cast_to_bhalf(unsigned short val) {
   return bhalf_t::impl_type(val);

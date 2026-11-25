@@ -77,7 +77,25 @@ using promote_3_t = typename promote_3<T, U, V>::type;
 // NOTE long double overloads are not available on the device
 
 #if defined(KOKKOS_ENABLE_SYCL)
-#define KOKKOS_IMPL_MATH_FUNCTIONS_NAMESPACE sycl
+// The SYCL math functions, except sin and atan2 with their signed zeros
+// restored: on Intel GPUs sycl::sin(-0) returns +0 and sycl::atan2(-1, inf)
+// returns +0 (oneAPI 2026.1, Data Center GPU Max 1550), where C and IEEE 754
+// give -0. sin(+-0) is +-0, and atan2(y, x) has the sign of y (also when it is
+// +-0 or +-pi). The complex functions rely on these signs (C99 Annex G), and
+// match the CUDA and std backends with them. A qualified name of this
+// namespace finds sin and atan2 here and every other function in sycl.
+namespace Kokkos::Impl::sycl_math {
+using namespace ::sycl;
+inline float sin(float x) { return x == 0 ? x : ::sycl::sin(x); }
+inline double sin(double x) { return x == 0 ? x : ::sycl::sin(x); }
+inline float atan2(float y, float x) {
+  return ::sycl::copysign(::sycl::atan2(y, x), y);
+}
+inline double atan2(double y, double x) {
+  return ::sycl::copysign(::sycl::atan2(y, x), y);
+}
+}  // namespace Kokkos::Impl::sycl_math
+#define KOKKOS_IMPL_MATH_FUNCTIONS_NAMESPACE ::Kokkos::Impl::sycl_math
 #else
 #define KOKKOS_IMPL_MATH_FUNCTIONS_NAMESPACE std
 #endif

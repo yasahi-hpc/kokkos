@@ -121,8 +121,9 @@ PROBE_HALF_T_IS_FLOAT=KOKKOS_HALF_T_IS_FLOAT
 PROBE_BHALF_T_IS_FLOAT=KOKKOS_BHALF_T_IS_FLOAT
 EOF
   # icpx -fsycl -E fails (several passes); preprocess the device pass only.
-  # shellcheck disable=SC2086
-  (cd "$BUILD_DIR" && "$CXX" $FLAGS -fsycl-device-only -E -P "$LOG_DIR/half_probe.cpp" \
+  # The flags are written for a shell (make passes them to /bin/sh, and a
+  # define holds a quoted string with spaces), so expand them with eval.
+  (cd "$BUILD_DIR" && eval "\"\$CXX\" $FLAGS -fsycl-device-only -E -P \"\$LOG_DIR/half_probe.cpp\"" \
     > "$LOG_DIR/half_probe.out" 2>&1)
   grep '^PROBE_' "$LOG_DIR/half_probe.out" | sed 's/^PROBE_/  /'
   grep -q '^PROBE_' "$LOG_DIR/half_probe.out" ||

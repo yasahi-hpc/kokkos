@@ -36,23 +36,37 @@
 //   device pass) compute in float, rounding once, which gives the same result
 //   for + - * / and the conversions. At run time nothing changes.
 // - HIP and SYCL: not constexpr (B4b-HIP, B4b-SYCL: future work).
+// - SYCL host: DPC++'s host conversion sycl::half(float) rounds wrongly below
+//   2^-13 (it truncates, and ties do not go to even; seen with oneAPI 2024.0
+//   and 2026.1), and sycl::half's host arithmetic converts back through it.
+//   So in the SYCL host pass the cast functions round with the same software
+//   conversions, and the operators compute in float. The device keeps the
+//   hardware conversions.
 // KOKKOS_IMPL_HALF_CONSTEXPR marks the functions (every declaration of the
 // cast functions too, as C++ requires of constexpr functions);
 // KOKKOS_IMPL_HALF_IS_CONSTEXPR tells tests (and CH5) that half values can
-// appear in constant expressions; KOKKOS_IMPL_HALF_CONSTANT_EVALUATED() is
-// true during the constant evaluation that needs the software path.
+// appear in constant expressions; KOKKOS_IMPL_HALF_SOFTWARE_PATH() is true
+// where the software conversions and the float path are used: during constant
+// evaluation on CUDA, and in the SYCL host pass.
 #if defined(KOKKOS_IMPL_HALF_TYPE_STANDARD_SUPPORT) || \
     defined(KOKKOS_IMPL_BHALF_TYPE_STANDARD_SUPPORT)
 #define KOKKOS_IMPL_HALF_IS_CONSTEXPR
 #define KOKKOS_IMPL_HALF_CONSTEXPR constexpr
-#define KOKKOS_IMPL_HALF_CONSTANT_EVALUATED() false
+#define KOKKOS_IMPL_HALF_SOFTWARE_PATH() false
 #elif defined(KOKKOS_ENABLE_CUDA)
 #define KOKKOS_IMPL_HALF_IS_CONSTEXPR
 #define KOKKOS_IMPL_HALF_CONSTEXPR constexpr
-#define KOKKOS_IMPL_HALF_CONSTANT_EVALUATED() __builtin_is_constant_evaluated()
+#define KOKKOS_IMPL_HALF_SOFTWARE_PATH() __builtin_is_constant_evaluated()
+#elif defined(KOKKOS_ENABLE_SYCL)
+#define KOKKOS_IMPL_HALF_CONSTEXPR
+#ifdef __SYCL_DEVICE_ONLY__
+#define KOKKOS_IMPL_HALF_SOFTWARE_PATH() false
+#else
+#define KOKKOS_IMPL_HALF_SOFTWARE_PATH() true
+#endif
 #else
 #define KOKKOS_IMPL_HALF_CONSTEXPR
-#define KOKKOS_IMPL_HALF_CONSTANT_EVALUATED() false
+#define KOKKOS_IMPL_HALF_SOFTWARE_PATH() false
 #endif
 
 namespace Kokkos::Experimental::Impl {
@@ -443,7 +457,7 @@ class alignas(FloatType) floating_point_wrapper {
   operator+() const {
     floating_point_wrapper tmp = *this;
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       tmp.val = +tmp.val;
     } else
 #endif
@@ -457,7 +471,7 @@ class alignas(FloatType) floating_point_wrapper {
   operator-() const {
     floating_point_wrapper tmp = *this;
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       tmp.val = -tmp.val;
     } else
 #endif
@@ -471,7 +485,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper&
   operator++() {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = val + impl_type(1.0F);  // cuda has no operator++ for __nv_bfloat
     } else
 #endif
@@ -486,7 +500,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper&
   operator--() {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = val - impl_type(1.0F);  // cuda has no operator-- for __nv_bfloat
     } else
 #endif
@@ -531,7 +545,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator+=(
       floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = val + rhs.val;  // cuda has no operator+= for __nv_bfloat
     } else
 #endif
@@ -555,7 +569,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator+=(
       float rhs) {
-    if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = cast_to_wrapper(cast_from_wrapper<float>(*this) + rhs, val).val;
       return *this;
     }
@@ -566,7 +580,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator+=(
       double rhs) {
-    if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = cast_to_wrapper(cast_from_wrapper<double>(*this) + rhs, val).val;
       return *this;
     }
@@ -578,7 +592,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator-=(
       floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = val - rhs.val;  // cuda has no operator-= for __nv_bfloat
     } else
 #endif
@@ -602,7 +616,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator-=(
       float rhs) {
-    if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = cast_to_wrapper(cast_from_wrapper<float>(*this) - rhs, val).val;
       return *this;
     }
@@ -613,7 +627,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator-=(
       double rhs) {
-    if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = cast_to_wrapper(cast_from_wrapper<double>(*this) - rhs, val).val;
       return *this;
     }
@@ -625,7 +639,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator*=(
       floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = val * rhs.val;  // cuda has no operator*= for __nv_bfloat
     } else
 #endif
@@ -649,7 +663,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator*=(
       float rhs) {
-    if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = cast_to_wrapper(cast_from_wrapper<float>(*this) * rhs, val).val;
       return *this;
     }
@@ -660,7 +674,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator*=(
       double rhs) {
-    if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = cast_to_wrapper(cast_from_wrapper<double>(*this) * rhs, val).val;
       return *this;
     }
@@ -672,7 +686,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator/=(
       floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = val / rhs.val;  // cuda has no operator/= for __nv_bfloat
     } else
 #endif
@@ -696,7 +710,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator/=(
       float rhs) {
-    if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = cast_to_wrapper(cast_from_wrapper<float>(*this) / rhs, val).val;
       return *this;
     }
@@ -707,7 +721,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator/=(
       double rhs) {
-    if (KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       val = cast_to_wrapper(cast_from_wrapper<double>(*this) / rhs, val).val;
       return *this;
     }
@@ -720,7 +734,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend floating_point_wrapper
   operator+(floating_point_wrapper lhs, floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       lhs += rhs;
     } else
 #endif
@@ -751,7 +765,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend floating_point_wrapper
   operator-(floating_point_wrapper lhs, floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       lhs -= rhs;
     } else
 #endif
@@ -782,7 +796,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend floating_point_wrapper
   operator*(floating_point_wrapper lhs, floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       lhs *= rhs;
     } else
 #endif
@@ -813,7 +827,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR friend floating_point_wrapper
   operator/(floating_point_wrapper lhs, floating_point_wrapper rhs) {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       lhs /= rhs;
     } else
 #endif
@@ -844,7 +858,7 @@ class alignas(FloatType) floating_point_wrapper {
   // Logical operators
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator!() const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(!val);
     }
 #endif
@@ -855,7 +869,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator&&(
       floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(val && rhs.val);
     }
 #endif
@@ -866,7 +880,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator||(
       floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(val || rhs.val);
     }
 #endif
@@ -877,7 +891,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator==(
       floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(val == rhs.val);
     }
 #endif
@@ -887,7 +901,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator!=(
       floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(val != rhs.val);
     }
 #endif
@@ -897,7 +911,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator<(
       floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(val < rhs.val);
     }
 #endif
@@ -907,7 +921,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator>(
       floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(val > rhs.val);
     }
 #endif
@@ -917,7 +931,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator<=(
       floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(val <= rhs.val);
     }
 #endif
@@ -927,7 +941,7 @@ class alignas(FloatType) floating_point_wrapper {
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR bool operator>=(
       floating_point_wrapper rhs) const {
 #ifdef KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH
-    if (!KOKKOS_IMPL_HALF_CONSTANT_EVALUATED()) {
+    if (!KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
       return static_cast<bool>(val >= rhs.val);
     }
 #endif

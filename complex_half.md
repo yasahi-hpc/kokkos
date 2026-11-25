@@ -2530,6 +2530,19 @@ job's probes use the tests' Debug flags and do not contract.
 lines, `half_bool_conversion` its infinity and NaN inputs, and `half_io` its
 `"+-1e999"` inputs. Found while checking the icpx flags of the first SYCL run.
 
+*Fixed special-value reference (2026-11-25).* The special-value tests
+(`complex_exp_sqrt_log_special_values`, `complex_hyperbolic_special_values`,
+`complex_inverse_special_values`) take the expected kind and sign of each result from
+`complex_special_ref` in `TestComplex.hpp`: glibc's, generated with GCC 12 by
+`tmp/claude_builds/complex_a6/gen_complex_special_ref.cpp` (the same for float and
+double), and checked against the CUDA and std backends, which matched glibc. Before,
+they compared with the host's `std::complex`, which under icpx is Intel's library.
+`std::complex` still provides the finite values (within the tolerance). Checked here:
+GCC 12 host 25 complex tests pass, `-ffinite-math-only` 18 pass and 7 skip. Not related, found
+with the GCC 12 shim: `TestHalfOperators.hpp:413` assumes `bhalf_t` is a wrapper whenever
+`half_t` is, which fails where `std::float16_t` exists without `std::bfloat16_t` (no
+machine tested has that).
+
 *Options added 2026-11-23:* `ENABLE_OPENMP=ON` also enables the OpenMP backend and
 builds and runs `Kokkos_CoreUnitTest_OpenMP_SmokeTest`/`OpenMP1` (separate build
 directories `build_std_half_<config>_omp`, `OMP_NUM_THREADS` default 8). `FULL=ON` also
@@ -2850,7 +2863,7 @@ bfloat16 needs the CUDA software path. Testable at run time only here.
 | ~~Optimized CUDA build (Release, A100)~~ | done 2026-11-25: `build_gpu_release`, job 10430071: the complex, numeric-trait and half tests pass with the Debug counts on Serial and Cuda (`cuda-tests.md`) | A100 |
 | ~~Complete CUDA core test suite (A100)~~ | done 2026-11-24 at `82a06f7a8`: every core test executable passes (jobs 10421072, 10421610), except `cuda_graph.sized_functor_launch`, which segfaulted in this build before the branch too (`cuda-tests.md`) | A100 |
 | Validation of the committed work with HIP half/bhalf, host and device | verification | AMD GPU (§8.3) |
-| Validation of the committed work with SYCL half/bhalf, host and device | verification; first run 2026-11-25 (Aurora job 9126968): numeric traits pass; found H17 on SYCL (the bool casts were missing, now defined) and that icpx needs `-fp-model=precise` (as Kokkos's CI); rerun pending (`sycl-tests.md`) | Aurora (Intel GPU Max, FP64; §8.4) |
+| Validation of the committed work with SYCL half/bhalf, host and device | verification; first run 2026-11-25 (Aurora job 9126968): numeric traits pass; found H17 on SYCL (the bool casts were missing, now defined) and that icpx needs `-fp-model=precise` (as Kokkos's CI). Second run (job 9127242): found DPC++'s host `sycl::half(float)` rounding wrongly below 2^-13 (Kokkos now rounds in software on the SYCL host) and the Intel GPU's `sin(-0)`/`atan2` losing signed zeros (Kokkos restores them on SYCL); the special-value tests now check glibc's signs from a fixed table instead of the host's `std::complex`, so every backend is held to the CUDA/std signs. Rerun pending (`sycl-tests.md`) | Aurora (Intel GPU Max, FP64; §8.4) |
 | ~~B4a: `constexpr` half, std backend~~ | done 2026-11-24 (`545a6aa5a`), verified on Aurora (job 9121273, four builds, `half_t` and `bhalf_t`); CUDA unchanged (A100 jobs 10415251, 10415253) | GCC ≥ 13 |
 | CH4: converting constructor from `std::complex<std::float16_t>` (D11) | **future work** (2026-11-24): `std::float16_t` needs C++23, Kokkos's minimum is C++20; pick up once C++23 is the minimum | GCC ≥ 13 |
 | ~~CH5: `constexpr complex<half_t>`, std part~~ | done 2026-11-24 (tests only), verified on Aurora (job 9121273) | GCC ≥ 13 |
