@@ -18,7 +18,13 @@ inline KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(half_t val) {
 
 // On the host, round with Kokkos's software conversion: DPC++'s host
 // sycl::half(float) rounds wrongly below 2^-13 (see
-// Kokkos_Half_FloatingPointWrapper.hpp). double rounds once from double.
+// Kokkos_Half_FloatingPointWrapper.hpp).
+// sycl::half and bfloat16 construct only from float, so a double (and, for
+// bfloat16, an integer beyond 2^24) would round twice, through float: e.g.
+// 2^-25 + 2^-77 gives 0, not the smallest subnormal 2^-24 (Intel GPU Max,
+// Aurora job 9127596). Those conversions round once, in software, on the
+// device too. For half_t the integers are exact in float up to 2^24, beyond
+// half's range.
 inline KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(float val) {
   if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
     return Impl::half_constexpr_from<half_t>(val);
@@ -29,9 +35,7 @@ inline KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(bool val) {
   return cast_to_half(static_cast<float>(val));
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(double val) {
-  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
-    return Impl::half_constexpr_from<half_t>(val);
-  return half_t::impl_type(val);
+  return Impl::half_constexpr_from<half_t>(val);
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR half_t cast_to_half(short val) {
   if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
@@ -166,9 +170,7 @@ inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(bool val) {
   return cast_to_bhalf(static_cast<float>(val));
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(double val) {
-  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
-    return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t::impl_type(val);
+  return Impl::half_constexpr_from<bhalf_t>(val);
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(short val) {
   if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
@@ -181,35 +183,23 @@ inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(unsigned short val) {
   return bhalf_t::impl_type(val);
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(int val) {
-  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
-    return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t::impl_type(val);
+  return Impl::half_constexpr_from<bhalf_t>(val);
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(unsigned int val) {
-  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
-    return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t::impl_type(val);
+  return Impl::half_constexpr_from<bhalf_t>(val);
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(long long val) {
-  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
-    return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t::impl_type(val);
+  return Impl::half_constexpr_from<bhalf_t>(val);
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t
 cast_to_bhalf(unsigned long long val) {
-  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
-    return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t::impl_type(val);
+  return Impl::half_constexpr_from<bhalf_t>(val);
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(long val) {
-  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
-    return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t::impl_type(val);
+  return Impl::half_constexpr_from<bhalf_t>(val);
 }
 inline KOKKOS_IMPL_HALF_CONSTEXPR bhalf_t cast_to_bhalf(unsigned long val) {
-  if (KOKKOS_IMPL_HALF_SOFTWARE_PATH())
-    return Impl::half_constexpr_from<bhalf_t>(val);
-  return bhalf_t::impl_type(val);
+  return Impl::half_constexpr_from<bhalf_t>(val);
 }
 
 template <class T>

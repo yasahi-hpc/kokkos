@@ -145,9 +145,52 @@ can't say which.
   and the input. A planted decode error with the shim shows it working; CUDA still
   compiles with 0 `warning #`.
 
-**Next:** rerun `qsub run_sycl_aurora.sh` (the same filters). The `*half*` log then names
-the failing kind and the first pattern's bits, from which the fix follows: a device
-conversion that differs from round to nearest even, or a miscompiled software path.
+**Fifth run: job 9127596** (2026-11-25, `2d0c11a87`, the diagnostic test). The same
+results, now by kind: on the device only the **midpoints** fail (63486 for `half_t`,
+65278 for `bhalf_t`). Decode, encode and the integers agree. The inference above (decode
+or encode) was wrong: one failure per pattern came from the midpoint checks. The first
+failure:
+
+| Type | Pattern | Input (double) | Software (correct) | Device `H(double)` |
+|---|---|---|---|---|
+| `half_t` | `0x0` | `0x3e60000000000001` = 2^-25 (1 + 2^-52), just above the midpoint of 0 and 2^-24 | `0x1` (rounds up) | `0x0` |
+| `bhalf_t` | `0x0` | `0x3790000000000001` = 2^-134 (1 + 2^-52), just above the midpoint of 0 and 2^-133 | `0x1` | `0x0` |
+
+This is double rounding: `sycl::half` and `sycl::ext::oneapi::bfloat16` construct only
+from `const float&` (`half_type.hpp:150,290`, `bfloat16.hpp:92`, DPC++ 2024.0). So a
+`double` rounds to float, here to the exact tie, and then the tie goes to even. In every
+pair of neighbours, the double next to the midpoint on the odd side fails: one per pattern.
+- **Not caused by B4b-SYCL.** This was the device behaviour of `half_t(double)` before the
+  branch. B4b-SYCL only made the test run on SYCL. The host had been fixed with the
+  software rounding (third run).
+- **The same for bf16 from integers above 2^24.** Through float the low bits are lost
+  before the second rounding: 2^30 + 2^22 + 1 should round up, and through float it goes
+  to 2^30. The test's integers `2^k | 2^(k/2) | 1` are never near a tie, so they passed.
+  For `half_t`, every integer is exact in float up to 2^24, far beyond half's range.
+
+**Fix** (`Kokkos_SYCL_Half_Conversion.hpp`, `Kokkos_Half_FloatingPointWrapper.hpp`):
+- On SYCL, `cast_to_half(double)`, `cast_to_bhalf(double)` and `cast_to_bhalf` from
+  `int`, `unsigned`, `long`, `long long` and their unsigned forms always round in software
+  (`Impl::half_constexpr_from`), on the device too: once, to nearest even.
+- The wrapper's four compound assignments with a `double` operand (`+= -= *= /=`) end
+  through the cast function instead of `static_cast<impl_type>(double)`. On SYCL that cast
+  also went through float. On CUDA the cast is `__double2half`, what `__half(double)`
+  calls; on the std backend it is native.
+- The `float`, `short` and `unsigned short` conversions keep the hardware on the device
+  (exact in float, or one rounding).
+
+**Test:** the integer kind now also has integers just above a tie, 2^k + 2^(k−MB−1) + 1
+(MB = 10 for half, 7 for bf16), as `long long` and, below 2^31, as `int`. Through float
+they round down for k > 24.
+
+**Checked here:** both SYCL passes compile (icpx 2024.0, 0 warnings); the shim run of
+`half_constexpr_path_matches_runtime` passes; the CUDA test object compiles with 0
+`warning #`.
+
+**Next:** rerun `qsub run_sycl_aurora.sh`. Expected: `*half*` 14 pass, 2 skip, and
+everything else as before. Optional on the A100 (`sub_half_A100.sh`): the new tie-adjacent
+integers against CUDA's `__ll2bfloat16_rn`/`__int2bfloat16_rn`, and the changed
+compound assignments.
 
 ### Part 1, the job script and what it checks (done above)
 

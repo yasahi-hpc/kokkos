@@ -1729,7 +1729,7 @@ too. And the full-type branches (device pass only) need their own fallback. So:
     run from the `/home` symlink path had written that path into `build_gpu`'s build
     files, which the compute nodes cannot see. Fixed by regenerating from `/work`.
 
-*B4b-SYCL status (2026-11-25): implemented; compile-checked here (DPC++ 2024.0). Aurora job 9127527: the compile-time checks hold, but `*_constexpr_path_matches_runtime` fails on the device (one comparison per non-NaN pattern but four); the test now reports which kind and the first pattern's bits, rerun pending (`sycl-tests.md`, Open, 0.).*
+*B4b-SYCL status (2026-11-25): implemented; compile-checked here (DPC++ 2024.0). Aurora job 9127527: the compile-time checks hold, but `*_constexpr_path_matches_runtime` fails on the device. Job 9127596, with the per-kind diagnostic, located it in the midpoints: on the device `half_t(double)` and `bhalf_t(double)` rounded twice, through float, because `sycl::half` and `bfloat16` construct only from `float`. This predates the branch; the same holds for bf16 from integers above 2^24. Fixed: on SYCL these conversions always round in software, and the wrapper's `double` compound assignments go through the cast functions. Rerun pending (`sycl-tests.md`, Open, 0.).*
 As B4b-CUDA, with one SYCL-specific difference: the host pass already uses the
 software conversions and the float path at run time (the DPC++ host rounding bug, H17
 notes), so only the device pass switches on constant evaluation.

@@ -586,12 +586,8 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator+=(
       double rhs) {
-    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
-      val = cast_to_wrapper(cast_from_wrapper<double>(*this) + rhs, val).val;
-      return *this;
-    }
-    double result = static_cast<double>(val) + rhs;
-    val           = static_cast<impl_type>(result);
+    // Through the cast function: impl_type(double) rounds twice on SYCL.
+    val = cast_to_wrapper(cast_from_wrapper<double>(*this) + rhs, val).val;
     return *this;
   }
 
@@ -633,12 +629,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator-=(
       double rhs) {
-    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
-      val = cast_to_wrapper(cast_from_wrapper<double>(*this) - rhs, val).val;
-      return *this;
-    }
-    double result = static_cast<double>(val) - rhs;
-    val           = static_cast<impl_type>(result);
+    val = cast_to_wrapper(cast_from_wrapper<double>(*this) - rhs, val).val;
     return *this;
   }
 
@@ -680,12 +671,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator*=(
       double rhs) {
-    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
-      val = cast_to_wrapper(cast_from_wrapper<double>(*this) * rhs, val).val;
-      return *this;
-    }
-    double result = static_cast<double>(val) * rhs;
-    val           = static_cast<impl_type>(result);
+    val = cast_to_wrapper(cast_from_wrapper<double>(*this) * rhs, val).val;
     return *this;
   }
 
@@ -727,12 +713,7 @@ class alignas(FloatType) floating_point_wrapper {
 
   KOKKOS_FUNCTION KOKKOS_IMPL_HALF_CONSTEXPR floating_point_wrapper& operator/=(
       double rhs) {
-    if (KOKKOS_IMPL_HALF_SOFTWARE_PATH()) {
-      val = cast_to_wrapper(cast_from_wrapper<double>(*this) / rhs, val).val;
-      return *this;
-    }
-    double result = static_cast<double>(val) / rhs;
-    val           = static_cast<impl_type>(result);
+    val = cast_to_wrapper(cast_from_wrapper<double>(*this) / rhs, val).val;
     return *this;
   }
 

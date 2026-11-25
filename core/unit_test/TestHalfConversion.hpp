@@ -389,7 +389,7 @@ static_assert(half_constexpr_checks<Kokkos::Experimental::bhalf_t>());
 #if defined(KOKKOS_IMPL_HALF_IS_CONSTEXPR)
 // The checks, by kind: 0 decode (half_constexpr_to<float> vs float(h)),
 // 1 encode (half_constexpr_from(float(h)) vs the pattern), 2 the midpoints and
-// their neighbours (vs H(double)), 3 the 64-bit integers (vs H(long long)).
+// their neighbours (vs H(double)), 3 the integers (vs H(long long), H(int)).
 // detail, if given, receives the operands of the first failure of the kind
 // (or of the first comparison, if none fails): {software bits, run-time bits,
 // the input's bits (low, high 32)}.
@@ -435,12 +435,33 @@ KOKKOS_FUNCTION int check_half_constexpr_path(std::uint32_t i, int kind,
     }
   }
   if (kind == 3 && i < 64) {  // 64-bit integers around 2^i, low bits set
+    const int k = static_cast<int>(i % 63);
     const long long v =
-        static_cast<long long>((1ull << (i % 63)) | (1ull << (i % 63) / 2) | 1);
+        static_cast<long long>((1ull << k) | (1ull << k / 2) | 1);
     for (long long w : {v, -v}) {
       fail(Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(w)),
            Kokkos::bit_cast<std::uint16_t>(H(w)),
            static_cast<std::uint64_t>(w));
+    }
+    // Just above the midpoint 2^k + 2^(k - MB - 1): rounds up. Through float
+    // (24 bits) the low 1 is lost for k > 24 and the tie goes to even, down.
+    constexpr int MB =
+        Kokkos::Experimental::Impl::is_bfloat16<H>::value ? 7 : 10;
+    if (k > MB + 1) {
+      const long long t =
+          static_cast<long long>((1ull << k) | (1ull << (k - MB - 1)) | 1);
+      for (long long w : {t, -t}) {
+        fail(Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(w)),
+             Kokkos::bit_cast<std::uint16_t>(H(w)),
+             static_cast<std::uint64_t>(w));
+        if (k < 31) {
+          const int w32 = static_cast<int>(w);
+          fail(
+              Kokkos::bit_cast<std::uint16_t>(KEI::half_constexpr_from<H>(w32)),
+              Kokkos::bit_cast<std::uint16_t>(H(w32)),
+              static_cast<std::uint64_t>(w));
+        }
+      }
     }
   }
   return err;
@@ -448,7 +469,7 @@ KOKKOS_FUNCTION int check_half_constexpr_path(std::uint32_t i, int kind,
 
 template <class H>
 void test_half_constexpr_path() {
-  const char *kinds[] = {"decode", "encode", "midpoints", "64-bit integers"};
+  const char *kinds[] = {"decode", "encode", "midpoints", "integers"};
   for (int kind = 0; kind < 4; ++kind) {
     int host = 0;
     for (std::uint32_t i = 0; i < 65536; ++i)
