@@ -2920,7 +2920,7 @@ to verify on Aurora.
 | Optional: optimized builds on Grace (`qsub -l walltime=2:00:00 -v BUILD_TYPE=Release run_std_half_fp16_grace.sh`); expected the same picture (half `fmadd`, seen at `-O2` in `aarch64_tests.md` step 3) | optional | Grace |
 | Optional: complex functions vs `std::complex<std::float16_t>` over the `ch3acc` inputs (expected equal up to the last bit) | measurement (proposed) | GCC ≥ 13, both evaluation methods |
 | ~~A8 (D11), half part: the deprecated-code test with `half_t`/`bhalf_t` on libstdc++, and the Kokkos 6 state (`DEPRECATED_CODE=OFF`)~~ | done 2026-11-24: Aurora jobs 9121388 (ON: 27 / 15 / 14 pass, 0 warnings) and 9121428 (OFF: 26 / 15 / 14, 0 warnings), four builds each | GCC ≥ 13 (Aurora) |
-| Pre-Ampere bf16 double rounding at run time (B4 notes) | fixed 2026-11-25: the correctly rounded CUDA 12 intrinsics on every architecture; compile-checked for sm_70; run: `sub_bf16fix_A100.sh` (sm_70 PTX JIT-compiled on the A100) | A100 (PTX), or a GPU older than sm_80 |
+| ~~Pre-Ampere bf16 double rounding at run time (B4 notes)~~ | fixed 2026-11-25: the correctly rounded CUDA 12 intrinsics on every architecture; verified with sm_70 PTX JIT-compiled on the A100 (job 10432529: `double` and 64/32-bit integers near a tie round once) (`cuda-tests.md`) | A100 (PTX), or a GPU older than sm_80 |
 
 Still open but testable **on this machine** (no other machine needed):
 - **A8** (D11): deprecation of the `std::complex` interop except the converting
