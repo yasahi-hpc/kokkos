@@ -262,7 +262,7 @@ Things to check that are specific to SYCL (§8.4):
 - **B4c:** before B4b-SYCL the numeric traits stayed bit patterns
   (`BitComparisonWrapper`) on SYCL; with it they are half values (job 9127657).
 
-### 2. Optional: the complete core test suite on SYCL
+### 2. The complete core test suite on SYCL: done in Release (jobs 9127921, 9127922)
 
 As done for CUDA (`sub_full_A100.sh`) and the std backend (`FULL=ON`): every core test
 executable, without a filter, on Serial and SYCL.
@@ -297,19 +297,31 @@ pass as in job 9127657. The full run is incomplete:
   end times. A failed run reports the last test it started. Each step's result goes to
   `steps.txt` as it happens, so a killed job keeps its summary.
 
-**Next**, two jobs, which can run at the same time (separate build directories):
+**Release, branch and base: jobs 9127921 and 9127922** (2026-11-26; the branch at
+`9e8d817fd`, the base `a360acf37` in a worktree; `FULL=ON`, `BUILD_TYPE=Release`). Every
+executable builds (SYCL1A too) and **every run passes on both**:
 
-```bash
-# the branch, Release (smaller binaries: SYCL1A should link)
-qsub -l walltime=6:00:00 -v FULL=ON,BUILD_TYPE=Release run_sycl_aurora.sh
-# the base commit, same settings, for comparison
-git worktree add ../kokkos-base a360acf37
-qsub -l walltime=6:00:00 -v FULL=ON,BUILD_TYPE=Release,KOKKOS_SRC=$PWD/../kokkos-base run_sycl_aurora.sh
-```
+| Executable | Branch: pass (skip) | Base: pass (skip) | Branch only |
+|---|---|---|---|
+| `Serial_SmokeTest` / `SYCL_SmokeTest` | 122 (6) / 122 (5) | 104 (6) / 104 (5) | the 18 new complex tests each |
+| `Serial1` / `SYCL1B` | 216 (8) / 87 (5) | 216 (7) / 87 (4) | `numeric_traits_half_vs_std_numeric_limits` (skips: std backend only) |
+| `Default` | 76 (2) | 66 | 12 half tests (the two `*_io_vs_std` skip) |
+| `Serial2`, `Serial_ViewSupport`, `SYCL1A`, `SYCL2A`-`2D`, `SYCL3`, `SYCL_ViewSupport` | 122 (11), 37, 131 (1), 95 (9), 16 (1), 4, 8, 56 (6), 37 | the same | — |
 
-The base checkout has none of the branch's tests, so only its failures matter: a failure in
-both runs is not the branch's. The SYCL math tests (`SYCL1A`, if it links) check the
-`sycl_math` wrappers (`sin`, `atan2` signed zeros) over all functions.
+- The branch runs every base test, plus 49 new ones; none are missing.
+- `mathematical_functions_signbit` passes on Serial and SYCL: the NaN-sign fix works.
+- SYCL1A's 26 SYCL mathematical-function tests pass, so the `sycl_math` wrappers (`sin`,
+  `atan2`) are fine across the functions.
+- Warnings: the same Intel notes on both (generic address space, register spills,
+  `RetryManager` recompilation). SYCL1A has 3 on the branch and 8 on the base: two
+  complex Bessel kernels spill on the base and not on the branch.
+
+So the Debug failures of job 9127705 don't appear in Release, on the branch or the base:
+`abort_from_device`, the team-policy errors, the `TeamThreadMDRangeParallelFor` abort,
+SYCL2A's segfault, and SYCL1A's link failure. They involve no half or complex code.
+Confirming that they are Debug-only and not from the branch would need a Debug `FULL` run
+of the base too (optional; SYCL1A would not link there either):
+`qsub -l walltime=6:00:00 -v FULL=ON,KOKKOS_SRC=$PWD/../kokkos-base run_sycl_aurora.sh`.
 
 ## Future work
 
