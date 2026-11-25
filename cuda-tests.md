@@ -24,6 +24,7 @@ All verified on the A100, host (Serial) and device (Cuda):
 | B4a, CH5 | CUDA unchanged by the std-backend `constexpr` (macro empty) | 10415251, 10415253 |
 | A8 | `std::complex` interop deprecated except the converting constructor; 27/27 complex tests on Serial and Cuda, including the deprecated-interop test for `half_t`/`bhalf_t`; 0 nvcc warnings | 10415439 |
 | B4b-CUDA, CH5 on CUDA | `constexpr half_t`/`bhalf_t` and `constexpr complex<half_t>` on CUDA: software conversions in constant evaluation, bit-identical to the hardware on every pattern, midpoint and 64-bit integer (host and device); B4a/CH5 `static_assert`s hold in both nvcc passes; `*half*` 14 pass, complex 27/27, numeric traits 14 | 10415931, 10415932, 10415933 |
+| Optimized CUDA build | `build_gpu_release` (Release, `-O3 -DNDEBUG`, no `Kokkos_ENABLE_DEBUG`; otherwise as `build_gpu`), at `f83f9ae81` (`sub_release_A100.sh`): `*complex*:*atomic*` 27/27 on Serial and Cuda, `*numeric_traits*` 14 on Serial1 and Cuda1, `*half*` 14 (the std-only comparisons skip): the Debug counts. The bit-exact tests (`complex_half_compute_in_float`, `complex_multiplication`, `*_constexpr_path_matches_runtime`) hold at `-O3` on host and device | 10430071 |
 | Complete CUDA core test suite | all 10 core test executables of `build_gpu`, unfiltered, at `82a06f7a8` (`sub_full_A100.sh`): `Cuda1` 224, `Cuda2` 129, `Cuda3` 62, `Cuda_ViewSupport` 37, `Serial_SmokeTest` 128, `Serial1` 217, `Serial2` 126, `Serial_ViewSupport` 37, `Default` 76 pass; `Cuda_SmokeTest` without `cuda_graph.sized_functor_launch`: 126 pass (`sub_cudasmoke_A100.sh`). Skips are Kokkos's own. `sized_functor_launch` segfaults, as it did in this build before the branch (below) | 10421072, 10421610 |
 | B4c | the half numeric traits are `constexpr half_t`/`bhalf_t` on CUDA (bit patterns on HIP/SYCL): compile-time checks hold in both nvcc passes; `*half*` 14, complex 27/27, numeric traits 14 on Serial and Cuda | 10420748, 10420749, 10420750 |
 | B4b-CUDA prototype | software `constexpr` conversions for `__half`/`__nv_bfloat16`: 0 mismatches over all floats, all bit patterns and all 65536² arithmetic pairs (non-NaN) | 10396298, 10396345, 10396374 |
@@ -34,24 +35,7 @@ Every one of these runs was the **Debug** build, and the test runs used **filter
 
 ## Open
 
-It can run on the A100.
-
-### 1. Optimized CUDA build (Release)
-
-**Why.** `build_gpu` is a Debug build. On the device, nvcc contracts `a*b + c` into FMAs
-by default (`--fmad=true`), also in Debug builds, which the device tests have
-therefore already seen. The host side is only optimized in a Release build. That is
-where the Aurora Release run showed GCC fusing half expressions (`c++23-tests.md`).
-Bit-exact tests such as `complex_half_compute_in_float` and `complex_multiplication`
-compare host and device paths.
-
-**How.** A second build directory, e.g. `build_gpu_release`
-(`-DCMAKE_BUILD_TYPE=Release`, otherwise as `build_gpu`). Then the filtered tests
-(`*complex*:*atomic*`, `*half*`, `*numeric_traits*`) on Serial and Cuda. A new configure
-needs many files: check the group's file quota on `/work` first, which is nearly full.
-
-**Expected:** all pass. A bit-exact test that fails only in Release would point to
-host-side contraction.
+None on this machine (the future work below needs other hardware or a decision).
 
 ### Not from this work: `cuda_graph.sized_functor_launch` segfaults
 
@@ -82,6 +66,7 @@ Not CUDA, so listed elsewhere: HIP and SYCL validation, and B4b on HIP and SYCL
 | `sub_half_A100.sh` | link and run `Kokkos_CoreUnitTest_Default` `*half*` |
 | `sub_numtraits_A100.sh` | `*numeric_traits*` on Serial1 and Cuda1 |
 | `sub_full_A100.sh` | every core test executable, unfiltered (objects compiled on the login node first, from the `/work` path) |
+| `sub_release_A100.sh` | the filtered tests in `build_gpu_release` (the optimized build) |
 | `sub_cudasmoke_A100.sh` | `Cuda_SmokeTest` without the pre-existing `sized_functor_launch` segfault |
 | `tmp/claude_builds/complex_a6/` | the CH3 accuracy/benchmark, CH6 benchmark, B4b prototype and probe sources, with their `sub_*_A100.sh` jobs |
 
