@@ -332,8 +332,8 @@ of job 9127705 come from the base, not from the branch: they are identical.
 | `Serial1` | `mathematical_functions_signbit` fails (fixed in `9e8d817fd`) | passes |
 
 The Release runs pass in full on both (jobs 9127921, 9127922). So these are Debug-only
-problems of Kokkos's SYCL backend with icpx 2026.1 on PVC. None is from this branch, and
-reporting them is outside its scope.
+problems of Kokkos's SYCL backend with icpx 2026.1 on PVC, **unrelated bugs** (listed under
+"Unrelated bugs" below). None is from this branch, and reporting them is outside its scope.
 
 **The empty logs are probably a full file system.** In both Debug jobs, executables ran
 for minutes and exited 0 with empty logs: `Serial2`, CPU only, ran 3 minutes, even
@@ -345,6 +345,25 @@ write either, so the script dies on its next `echo`. That fits a full or over-qu
 delete unused build directories (`build_sycl_pvc` in both checkouts, about the size of a
 Debug AOT build). The script now prints the free space and quota at the start and the end,
 and flags an empty log at once.
+
+## Unrelated bugs (not from this branch)
+
+Kokkos SYCL backend problems found during the full-suite runs. They are **unrelated to
+`complex<half_t>`**: the base `a360acf37` fails identically (job 9128099), and the branch
+passes the full suite in Release (job 9127921). Debug only; icpx 2026.1, Intel Data Center
+GPU Max 1550. Not fixed here; candidates for a Kokkos issue.
+
+| Bug | Where | Seen in |
+|---|---|---|
+| Link fails: "relocation truncated to fit" (`R_X86_64_PC32`), "PC-relative offset overflow in PLT entry"; the Debug binary is too large for the default code model | `Kokkos_CoreUnitTest_SYCL1A` | 9127705, 9128099 |
+| `sycl_DeathTest.abort_from_device`: dies, but the device message lacks the expected text ("Meurs, pourriture communiste !"); only "AssertHandler::printMessage" | `TestAbort.hpp:58`, `SYCL_SmokeTest` | 9127705, 9128099 |
+| `sycl.team_single_thread_int_ptr` fails | `TestTeamBasic.hpp:514`, `SYCL_SmokeTest` | 9127705, 9128099 |
+| 210,738 `TestTeamPolicy member(...) error` lines | `SYCL_SmokeTest` | 9127705, 9128099 |
+| GPU page fault ("Segmentation fault from GPU … NotPresent … banned: 1, aborting"), process aborts | `sycl.TeamThreadMDRangeParallelFor`, `SYCL_SmokeTest` | 9127705, 9128099 |
+| Segmentation fault | `Kokkos_CoreUnitTest_SYCL2A` | 9127705, 9128099 |
+
+Not a bug: the empty logs in both Debug jobs, probably a full file system or exceeded
+quota (above).
 
 ## Future work
 
