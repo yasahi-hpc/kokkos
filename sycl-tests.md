@@ -1,6 +1,6 @@
 # SYCL backend: done, open and future tasks
 
-Status on 2026-11-25 of the tasks on the SYCL backend, where `half_t` and `bhalf_t` wrap
+Status on 2026-11-26 of the tasks on the SYCL backend, where `half_t` and `bhalf_t` wrap
 `sycl::half` and `sycl::ext::oneapi::bfloat16`. The full record is in `complex_half.md`
 (§8.4, and §8.5 for the task table); this file is the summary. For the other backends see
 `cuda-tests.md` and `c++23-tests.md`.
@@ -11,6 +11,29 @@ and §8.5 were written before Aurora was available and say "an Intel GPU with FP
 
 **Aurora environment:** `icpx` (oneAPI) is available by default; only
 `module load cmake` is needed. Runs over 1 hour go to the `capacity` queue.
+
+## Remaining tasks (summary, 2026-11-26)
+
+**Nothing required is open on SYCL.** All of these are done and verified on Aurora:
+- the complex, half and numeric-trait tests: job 9127366;
+- B4b-SYCL, CH5 and B4c: job 9127657;
+- the full core suite in Release, matching the base: jobs 9127921 and 9127922.
+
+The last code change, `9e8d817fd`, is the one the full Release run tested; later commits
+change only docs and the job script.
+
+| # | Task | Kind | Notes |
+|---|---|---|---|
+| 1 | Check the quota of `/home/yasahi` and delete unused build directories | housekeeping, before the next large job | The empty logs of the Debug jobs (9127705, 9128099) point to a full file system. Candidates: `build_sycl_pvc` (Debug) in both checkouts, and the base worktree `../kokkos-base` with its builds (`git worktree remove ../kokkos-base`) once no more comparisons are needed. `run_sycl_aurora.sh` now prints the space and quota |
+| 2 | Report the unrelated Debug bugs to Kokkos | optional, external | The six under "Unrelated bugs": SYCL1A link overflow, `abort_from_device`, `team_single_thread_int_ptr`, the `TestTeamPolicy` errors, the GPU page fault in `TeamThreadMDRangeParallelFor`, the SYCL2A segfault. Reproduce on Kokkos's `develop` first |
+| 3 | Kokkos's minimum SYCL compiler, icpx 2024.2.1 (only 2026.1 tested here; 2024.0 compile-checked on the other machine) | optional | If Aurora has an older oneAPI module: `qsub run_sycl_aurora.sh` after loading it, part 1 only. The host-rounding bug was in 2024.0 and 2026.1, and the software path covers it either way |
+| 4 | The Debug `TestTeamPolicy` failures make each Debug `SYCL_SmokeTest` log 11 MB | note | Use Release for full runs, or a filter in Debug |
+
+**Future work** (not testable on Aurora): an Intel GPU without FP64 (the tests use
+`double` in kernels; the half paths themselves don't), and SYCL on NVIDIA or AMD GPUs (the
+`FIXME_SYCL` bfloat16 check in `Kokkos_Setup_SYCL.hpp`). Other backends: HIP
+(`complex_half.md` §8.3, B4b-HIP), CUDA (`cuda-tests.md`), the std backend
+(`c++23-tests.md`).
 
 ## Done
 
@@ -213,6 +236,9 @@ fourth run.
 
 ## Open
 
+No required task is open (see the summary at the top). The sections below describe the
+job script and the runs.
+
 ### Part 1, the job script and what it checks (done above)
 
 One Aurora job:
@@ -370,6 +396,8 @@ quota (above).
 | Task | Notes |
 |---|---|
 | (B4b-SYCL, CH5 and B4c on SYCL: done 2026-11-25, job 9127657, see Done) | |
+| An Intel GPU without FP64 | the tests' `double` instantiations need FP64; Aurora's GPUs have it |
+| SYCL on NVIDIA or AMD GPUs | `Kokkos_Setup_SYCL.hpp`'s `FIXME_SYCL`: bfloat16 is only supported from compute capability 8.0 |
 
 Not SYCL, listed elsewhere: HIP (`complex_half.md` §8.3), CUDA (`cuda-tests.md`), the std
 backend (`c++23-tests.md`).
