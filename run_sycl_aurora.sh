@@ -75,6 +75,9 @@ echo "compiler: $CXX: $("$CXX" --version | head -1)"
 echo "cmake:    $(cmake --version | head -1)"
 echo "build:    $BUILD_DIR ($BUILD_TYPE, Kokkos_ARCH_$ARCH, CMAKE_CXX_FLAGS=$CXX_FLAGS)"
 echo "logs:     $LOG_DIR"
+# Free space: a full file system loses the test output silently (empty logs).
+space() { df -h "$LOG_DIR" "$BUILD_DIR" 2>/dev/null | sed 's/^/  /'; command -v myquota >/dev/null && myquota 2>&1 | sed 's/^/  /'; }
+echo "space:"; space
 echo "===== SYCL devices"
 (sycl-ls 2>&1 || echo "sycl-ls not available") | head -20
 
@@ -171,6 +174,10 @@ run_test() {  # run_test <executable suffix> <filter>
   local trc=$?
   echo "  end   $(date +%T), exit $trc$([ $trc = 124 ] && echo ' (timeout)')"
   grep -E '^\[ *(FAILED|PASSED) *\]|Failure|Expected|Which is|actual' "$log" | sort -u | head -30
+  # An empty log or one without a gtest summary, after exit 0: the output was lost.
+  if [ ! -s "$log" ]; then
+    echo "  empty log: no output was written (file system full or over quota?)"; space
+  fi
   local nskip
   nskip=$(grep -cE '^\[ *SKIPPED *\] [^ ]+ \(' "$log")
   record "$name" "$( [ $trc = 0 ] && grep -m1 'PASSED' "$log" | sed 's/.*PASSED *\] *//' || echo "FAILED (exit $trc, last started: $(grep '^\[ RUN' "$log" | tail -1 | sed 's/.*\] *//'), see $log)")$([ "$nskip" -gt 0 ] && echo " ($nskip skipped)")"
@@ -184,6 +191,8 @@ if [ "$FULL" = ON ]; then
   for t in $TESTS; do run_test "$t" ''; done
 fi
 
+echo "===== Space at the end"
+space
 echo "===== Summary"
 status=0
 for i in "${!STEP_NAMES[@]}"; do

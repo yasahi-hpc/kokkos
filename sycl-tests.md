@@ -319,9 +319,32 @@ executable builds (SYCL1A too) and **every run passes on both**:
 So the Debug failures of job 9127705 don't appear in Release, on the branch or the base:
 `abort_from_device`, the team-policy errors, the `TeamThreadMDRangeParallelFor` abort,
 SYCL2A's segfault, and SYCL1A's link failure. They involve no half or complex code.
-Confirming that they are Debug-only and not from the branch would need a Debug `FULL` run
-of the base too (optional; SYCL1A would not link there either):
-`qsub -l walltime=6:00:00 -v FULL=ON,KOKKOS_SRC=$PWD/../kokkos-base run_sycl_aurora.sh`.
+**Debug, base: job 9128099** (2026-11-26, `a360acf37`, `FULL=ON`, Debug). The Debug failures
+of job 9127705 come from the base, not from the branch: they are identical.
+
+| | Branch, job 9127705 | Base, job 9128099 |
+|---|---|---|
+| SYCL1A link | fails, 10 "relocation truncated to fit" | the same |
+| `SYCL_SmokeTest` failures | `abort_from_device`, `team_single_thread_int_ptr` | the same |
+| `TestTeamPolicy member(...) error` lines | 210,738 | 210,738 |
+| end of `SYCL_SmokeTest` | "Segmentation fault from GPU … banned: 1, aborting" in `TeamThreadMDRangeParallelFor` | the same |
+| SYCL2A | segfault | segfault |
+| `Serial1` | `mathematical_functions_signbit` fails (fixed in `9e8d817fd`) | passes |
+
+The Release runs pass in full on both (jobs 9127921, 9127922). So these are Debug-only
+problems of Kokkos's SYCL backend with icpx 2026.1 on PVC. None is from this branch, and
+reporting them is outside its scope.
+
+**The empty logs are probably a full file system.** In both Debug jobs, executables ran
+for minutes and exited 0 with empty logs: `Serial2`, CPU only, ran 3 minutes, even
+line-buffered. The SYCL1B logs stop at about 4 KB, and the job ends without a summary. A
+process loses its output like that when its writes fail. At the end `job.out`'s `tee` can't
+write either, so the script dies on its next `echo`. That fits a full or over-quota
+`/home/yasahi`: two Debug and two Release build directories, plus the 11 MB
+`SYCL_SmokeTest` logs. Check with `myquota` (or `df -h ~`) before the next large job, and
+delete unused build directories (`build_sycl_pvc` in both checkouts, about the size of a
+Debug AOT build). The script now prints the free space and quota at the start and the end,
+and flags an empty log at once.
 
 ## Future work
 
