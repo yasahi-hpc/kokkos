@@ -388,6 +388,16 @@ GPU Max 1550. Not fixed here; candidates for a Kokkos issue.
 | GPU page fault ("Segmentation fault from GPU … NotPresent … banned: 1, aborting"), process aborts | `sycl.TeamThreadMDRangeParallelFor`, `SYCL_SmokeTest` | 9127705, 9128099 |
 | Segmentation fault | `Kokkos_CoreUnitTest_SYCL2A` | 9127705, 9128099 |
 
+**Reproducer:** `sycl_debug.sh` (PBS, `debug` queue, 1 hour). It configures any Kokkos
+checkout in Debug and builds only SYCL_SmokeTest, SYCL2A and SYCL1A. It runs each case on
+its own, then all of SYCL_SmokeTest in order, line-buffered and with a timeout. It counts
+the `TestTeamPolicy member` lines and keeps only five, and prints a summary with the
+expected outcome. For `develop`: `git clone https://github.com/kokkos/kokkos.git
+kokkos-develop && qsub -v KOKKOS_SRC=$PWD/kokkos-develop sycl_debug.sh`. With `-v
+BUILD_TYPE=Release` it gives the passing comparison. Note: `sycl.team_for` *passes* while
+printing the 210,738 lines. `TestTeam.hpp:59` prints a mismatch but does not count it, so
+the wrong team ranks go unnoticed by the test.
+
 Not a bug: the empty logs in both Debug jobs, probably a full file system or exceeded
 quota (above).
 
@@ -407,5 +417,6 @@ backend (`c++23-tests.md`).
 | File | Purpose |
 |---|---|
 | `tmp/claude_builds/complex_a6/b4sycl.cpp` | the B4b-SYCL premise check (compile only) |
+| `sycl_debug.sh` | minimal reproducer of the unrelated Debug bugs (any Kokkos checkout) |
 | `/home/i18048/claude_builds/complex/fakesycl/` | the B4b-SYCL compile check: `t.cpp`, and `inc/` (the host config with `KOKKOS_ENABLE_SYCL`, `Kokkos_Setup_SYCL.hpp` in the setup header); `icpx -std=c++20 -fp-model=precise -fsycl [-fsycl-device-only] -fsyntax-only -Iinc -I<kokkos>/core/src t.cpp` after `module purge; module load intel/2024.0.0` |
 | `run_sycl_aurora.sh` | part 1 (and part 2 with `FULL=ON`) on Aurora |
