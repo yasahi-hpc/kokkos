@@ -6,13 +6,20 @@ been built or run with HIP yet. The plan's HIP notes are in `complex_half.md` §
 the B4 per-backend table. For the other backends see `cuda-tests.md`, `sycl-tests.md` and
 `c++23-tests.md`.
 
-**Where to test:** an AMD GPU (access available as of 2026-11-28). Needed before writing the
-job script:
-- the scheduler and its job header (account, queue, walltime limits);
-- the GPU and its Kokkos architecture, e.g. MI250X → `Kokkos_ARCH_AMD_GFX90A`, MI300A →
-  `AMD_GFX942_APU`, MI300X → `AMD_GFX942`;
-- the ROCm module(s) and versions;
-- which file systems the compute nodes can see (the A100 lesson: `/home` was invisible).
+**Where to test:** an MI250X machine (Slurm, `--account=gen2224`, `--constraint=MI250`;
+Cray PE: `craype-x86-trento craype-accel-amd-gfx90a PrgEnv-amd cmake/3.27.9`, `hipcc`),
+`Kokkos_ARCH_AMD_GFX90A`. The setup follows the distributed-FFT job scripts there
+(`mi250x_common.sh`). Submit from a checkout on a file system the compute nodes see, e.g.
+`/lus/scratch/...`.
+
+**Job script for task 1:** `run_hip_mi250x.sh` (`sbatch run_hip_mi250x.sh`; 3 hours,
+Debug by default, `--export=ALL,BUILD_TYPE=Release` for an optimized build). It prints the
+ROCm version and the half macros of the host and device pass. It builds `Serial_SmokeTest`,
+`Serial1`, `HIP_SmokeTest`, `HIP` (all HIP tests, the large one) and `Default`, runs the
+filters of task 1, and adds `*mathematical_functions*` on Serial and HIP for the SYCL
+signed-zero lesson. It keeps the SYCL script's safeguards: line-buffered output, a timeout
+per run, `steps.txt` written as steps finish, and the free space. Logs:
+`hip_logs.<job id>/`.
 
 **The ROCm version matters.** `KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH` is defined in the device
 pass always, but on the host only for HIP ≥ 6.4 (`setup/Kokkos_Setup_HIP.hpp:55-59`). So
@@ -156,5 +163,6 @@ half arithmetic.
 |---|---|
 | `core/src/HIP/Kokkos_HIP_Half_Impl_Type.hpp`, `..._Conversion.hpp`, `..._MathematicalFunctions.hpp` | HIP's half types, casts and math |
 | `core/src/setup/Kokkos_Setup_HIP.hpp:52-59` | native half/bf16, the host full-type switch at HIP 6.4 |
-| `run_sycl_aurora.sh` | template for the HIP job script (probe, filters, safeguards) |
+| `run_hip_mi250x.sh` | task 1 on the MI250X (Slurm) |
+| `run_sycl_aurora.sh` | the SYCL job script it follows |
 | `tmp/claude_builds/complex_a6/ch2probe.cpp`, `ch3bench.cpp`, `ch6bench.cpp` | CH2 probe, CH3/CH6 benchmarks |
