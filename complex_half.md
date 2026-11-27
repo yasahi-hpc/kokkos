@@ -2860,6 +2860,8 @@ Record the ROCm version: it decides `KOKKOS_HALF_IS_FULL_TYPE_ON_ARCH` on the ho
   and `ch6bench.cpp` (needs the HIP `__half2` intrinsics) to confirm that the float path
   costs nothing there either.
 
+Summary of the HIP tasks: `hip-tests.md` (2026-11-28; an AMD GPU is available).
+
 *Future task:* **B4b-HIP.** It needs a way to read `__half` bits in constant evaluation
 (B4 table). First test the derived-class workaround with the real ROCm headers; the
 probe here used a mock with clang 17.
